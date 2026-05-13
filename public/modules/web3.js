@@ -5,7 +5,7 @@
 import { VIZ_CHAINS, MINT_CHAIN, getAllRpcUrls } from './chains.js';
 import { UI } from './state.js';
 import { showToast, setButtonLoading, showProgress, hideProgress } from './ui.js';
-import { login, getNFTPrice } from './api.js';
+import { login, getNFTPrice, getContractAddress } from './api.js';
 
 export async function updateChainStatus() {
   if (!window.ethereum || !UI.chainStatus) return;
@@ -15,17 +15,16 @@ export async function updateChainStatus() {
     const selectedChainKey = UI.chainSelect.value;
     const selectedChain = VIZ_CHAINS[selectedChainKey];
     
-    // 🔥 Salīdzina HEX stringus, nevis decimālos skaitļus
     if (selectedChain && chainIdHex === selectedChain.chainIdHex) {
       UI.chainStatus.className = 'chain-status connected';
-      UI.chainStatus.title = '✓ Connected to selected network';
+      UI.chainStatus.title = '✓ Connected to correct network';
     } else {
       UI.chainStatus.className = 'chain-status disconnected';
       UI.chainStatus.title = '⚠️ Please switch network in your wallet';
     }
   } catch (error) {
     UI.chainStatus.className = 'chain-status disconnected';
-    UI.chainStatus.title = '❌ Network error';
+    UI.chainStatus.title = '❌ Unable to detect network';
   }
 }
 
@@ -33,17 +32,17 @@ export async function switchToMintChain() {
   try {
     await window.ethereum.request({
       method: 'wallet_switchEthereumChain',
-      params: [{ chainId: MINT_CHAIN.chainIdHex }]  // 🔥 HEX, nevis decimāls
+      params: [{ chainId: MINT_CHAIN.chainIdHex }]
     });
   } catch (error) {
     if (error.code === 4902) {
       await window.ethereum.request({
         method: 'wallet_addEthereumChain',
         params: [{
-          chainId: MINT_CHAIN.chainIdHex,  // 🔥 HEX
+          chainId: MINT_CHAIN.chainIdHex,
           chainName: MINT_CHAIN.name,
           nativeCurrency: { name: MINT_CHAIN.nativeCurrency, symbol: MINT_CHAIN.nativeCurrency, decimals: 18 },
-          rpcUrls: getAllRpcUrls('baseSepolia'),  // 🔥 Izmanto helper no chains.js
+          rpcUrls: getAllRpcUrls('baseSepolia'),
           blockExplorerUrls: [MINT_CHAIN.blockExplorer]
         }]
       });
@@ -57,18 +56,17 @@ export async function switchToVizChain(chainIdHex) {
   try {
     await window.ethereum.request({
       method: 'wallet_switchEthereumChain',
-      params: [{ chainId: chainIdHex }]  // 🔥 Parametrs jau ir HEX
+      params: [{ chainId: chainIdHex }]
     });
     await updateChainStatus();
   } catch (error) {
     if (error.code === 4902) {
-      // 🔥 Meklē pēc chainIdHex, nevis decimālā chainId
       const chainConfig = Object.values(VIZ_CHAINS).find(c => c.chainIdHex === chainIdHex);
       if (chainConfig) {
         await window.ethereum.request({
           method: 'wallet_addEthereumChain',
           params: [{
-            chainId: chainConfig.chainIdHex,  // 🔥 HEX
+            chainId: chainConfig.chainIdHex,
             chainName: chainConfig.name,
             nativeCurrency: { name: chainConfig.nativeCurrency, symbol: chainConfig.nativeCurrency, decimals: 18 },
             rpcUrls: Array.isArray(chainConfig.rpc) ? chainConfig.rpc : [chainConfig.rpc],
@@ -83,13 +81,50 @@ export async function switchToVizChain(chainIdHex) {
   }
 }
 
+// 🔥 Pārbauda bilanci un atjaunina displeju
+async function updateBalanceDisplay(account) {
+  const balanceDisplay = document.getElementById('balanceDisplay');
+  if (!balanceDisplay) return;
+  
+  try {
+    balanceDisplay.textContent = '💰 Checking balance...';
+    balanceDisplay.className = 'balance-display checking';
+    
+    const baseProvider = new ethers.JsonRpcProvider('https://sepolia.base.org');
+    const contractAddress = await getContractAddress();
+    
+    if (!contractAddress) {
+      throw new Error('Contract not found');
+    }
+    
+    const contract = new ethers.Contract(contractAddress, ["function mintPrice() view returns (uint256)"], baseProvider);
+    const mintPriceWei = await contract.mintPrice();
+    const balanceWei = await baseProvider.getBalance(account);
+    
+    const balanceEth = parseFloat(ethers.formatEther(balanceWei)).toFixed(5);
+    const mintPriceEth = parseFloat(ethers.formatEther(mintPriceWei)).toFixed(5);
+    
+    if (balanceWei >= mintPriceWei) {
+      balanceDisplay.textContent = `✅ Base: ${balanceEth} ETH (enough to mint)`;
+      balanceDisplay.className = 'balance-display sufficient';
+    } else {
+      balanceDisplay.textContent = `⚠️ Base: ${balanceEth} ETH (need ${mintPriceEth} ETH to mint)`;
+      balanceDisplay.className = 'balance-display insufficient';
+    }
+  } catch (error) {
+    console.error("Balance check failed:", error);
+    balanceDisplay.textContent = `❌ Unable to check balance. Please refresh.`;
+    balanceDisplay.className = 'balance-display insufficient';
+  }
+}
+
 export async function connectWallet(app) {
   setButtonLoading(UI.connectBtn, true);
   showProgress();
   
   try {
     if (!window.ethereum) {
-      alert('Please install MetaMask, Rabby, or Enkrypt!');
+      alert('Please install a wallet like MetaMask, Rabby, or Enkrypt to use this app.');
       return;
     }
     
@@ -97,10 +132,10 @@ export async function connectWallet(app) {
     const vizChainConfig = VIZ_CHAINS[app.currentVizChain];
     
     if (!vizChainConfig) {
+      showToast('Please select a valid blockchain network', 'warning');
       throw new Error('Invalid chain selected');
     }
     
-    // 🔥 Nodod chainIdHex, nevis decimālo chainId
     await switchToVizChain(vizChainConfig.chainIdHex);
     
     const provider = new ethers.BrowserProvider(window.ethereum);
@@ -112,7 +147,7 @@ export async function connectWallet(app) {
     app.signer = signer;
     app.account = account;
     
-    UI.accountDisplay.textContent = `Connected account on ${vizChainConfig.name}: ${account}`;
+    UI.accountDisplay.textContent = `Connected: ${account.slice(0, 10)}...${account.slice(-6)}`;
     
     const loginSuccess = await login(signer, account);
     if (!loginSuccess) {
@@ -129,12 +164,23 @@ export async function connectWallet(app) {
     
     await updateChainStatus();
     
+    // Check balance on Base Sepolia
+    await updateBalanceDisplay(account);
+    
     const tokenCount = app.tokens.filter(t => !t.isNFT).length;
-    showToast(`Connected to ${vizChainConfig.name}! Loaded ${app.tokens.length} assets (${tokenCount} tokens, ${app.nftCenters.length} NFTs)`, 'success');
+    showToast(`✅ Connected to ${vizChainConfig.name}! Loaded ${app.tokens.length} assets (${tokenCount} tokens, ${app.nftCenters.length} NFTs)`, 'success');
     
   } catch (err) { 
-    console.error(err); 
-    showToast('Connection failed: ' + err.message, 'error'); 
+    console.error(err);
+    
+    let userMessage = 'Unable to connect wallet. Please try again.';
+    if (err.message && err.message.includes('User rejected')) {
+      userMessage = 'You cancelled the connection. Please approve to continue.';
+    } else if (err.message && err.message.includes('Already processing')) {
+      userMessage = 'Please wait, wallet is busy. Try again in a moment.';
+    }
+    
+    showToast(userMessage, 'error'); 
   } finally { 
     setButtonLoading(UI.connectBtn, false); 
     hideProgress(); 
