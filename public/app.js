@@ -69,7 +69,7 @@ const App = Object.assign({}, AppState, {
 
   handleSessionExpired() {
     console.log("Session expired, cleaning up...");
-    showToast('Session expired. Please reconnect wallet.', 'warning');
+    showToast('⏰ Session expired. Please reconnect your wallet.', 'warning');
     
     if (this.ctx) {
       this.ctx.clearRect(0, 0, UI.canvas.width, UI.canvas.height);
@@ -100,16 +100,16 @@ const App = Object.assign({}, AppState, {
       UI.generateNFTBtn.setAttribute('data-price', '');
     }
     
-    showToast('Session expired. Please click "Connect Wallet" to reconnect.', 'warning');
+    showToast('⏰ Session expired. Please click "Connect Wallet" to reconnect.', 'warning');
   },
 
   async generateNFT() {
     if (!this.account || !this.provider || !this.signer) { 
-      showToast('Connect wallet first!', 'warning');
+      showToast('🔌 Please connect your wallet first', 'warning');
       return; 
     }
     
-    showToast('Please switch to Base Sepolia network for minting...', 'info');
+    showToast('🔄 Switching to Base Sepolia network for minting...', 'info');
     
     await switchToMintChain();
     
@@ -119,7 +119,7 @@ const App = Object.assign({}, AppState, {
     
     const loginSuccess = await login(this.signer, this.account);
     if (!loginSuccess) {
-      showToast('Authentication failed after network switch. Please reconnect wallet.', 'error');
+      showToast('🔐 Authentication failed. Please reconnect your wallet.', 'error');
       setButtonLoading(UI.generateNFTBtn, false);
       return;
     }
@@ -138,7 +138,7 @@ const App = Object.assign({}, AppState, {
     }
     
     setButtonLoading(UI.generateNFTBtn, true);
-    showToast('Preparing image...', 'info');
+    showToast('📸 Preparing image...', 'info');
     
     try {
       const imageResult = await uploadImageToIPFS(UI.canvas);
@@ -151,7 +151,7 @@ const App = Object.assign({}, AppState, {
         this.lastVideoURL = videoResult; 
       } catch (error) { 
         console.warn('Video upload failed:', error); 
-        showToast('Video upload failed, continuing without video', 'warning');
+        showToast('🎬 Video upload failed, continuing without video', 'warning');
       }
       
       let cleanImageCID = imageResult.cid || imageResult.ipfs;
@@ -169,7 +169,7 @@ const App = Object.assign({}, AppState, {
       
       const metadata = {
         name: "Wallet Visualization NFT",
-        description: `Generated from wallet ${this.account.substring(0, 10)}... on ${new Date().toISOString()}`,
+        description: `Generated from wallet ${this.account.substring(0, 6)}...${this.account.substring(-4)} on ${new Date().toISOString()}`,
         image: `${PINATA_GATEWAY}${cleanImageCID}`,
         attributes: [
           { trait_type: "ETH Balance", value: this.ethBalance.toString() },
@@ -188,9 +188,8 @@ const App = Object.assign({}, AppState, {
       this.lastMetadataURL = metadataResult;
       
       showIPFSPreview(imageResult, videoResult, metadataResult);
-      showToast('Preparing mint transaction...', 'info');
+      showToast('📝 Preparing mint transaction...', 'info');
       
-      // 🔥 Kļūdu apstrāde ap apiFetch mint call
       let mintData;
       try {
         const mintRes = await apiFetch('/api/mint-with-signature', {
@@ -204,7 +203,7 @@ const App = Object.assign({}, AppState, {
         mintData = await mintRes.json();
       } catch (apiError) {
         console.error("Mint API call failed:", apiError);
-        showToast(`Mint preparation failed: ${apiError.message}`, 'error');
+        showToast(`❌ Mint preparation failed: ${apiError.message}`, 'error');
         setButtonLoading(UI.generateNFTBtn, false);
         hideProgress();
         return;
@@ -214,7 +213,7 @@ const App = Object.assign({}, AppState, {
         throw new Error(mintData.error || 'Failed to prepare mint transaction');
       }
       
-      showToast('Sign transaction in wallet...', 'info');
+      showToast('✍️ Please sign the transaction in your wallet...', 'info');
       
       const tx = {
         to: mintData.transaction.to,
@@ -224,7 +223,7 @@ const App = Object.assign({}, AppState, {
       };
       
       const signedTx = await this.signer.sendTransaction(tx);
-      showToast('Transaction submitted, waiting for confirmation...', 'info');
+      showToast('⏳ Transaction submitted, waiting for confirmation...', 'info');
       
       await signedTx.wait();
       showToast('✅ NFT minted successfully!', 'success');
@@ -233,8 +232,18 @@ const App = Object.assign({}, AppState, {
       
     } catch (error) {
       console.error(error);
-      showToast(`Error: ${error.message.substring(0, 100)}`, 'error');
-      alert(`NFT minting failed: ${error.message}\n\nPlease check:\n- You have enough ETH for gas\n- Contract address is correct\n- Network is Base Sepolia`);
+      
+      let userMessage = '❌ Mint failed. Please try again.';
+      if (error.message && error.message.includes('insufficient funds')) {
+        userMessage = '💰 Insufficient funds. Please add ETH to your wallet.';
+      } else if (error.message && error.message.includes('User denied')) {
+        userMessage = '🛑 You cancelled the transaction.';
+      } else if (error.message && error.message.includes('Network is Base Sepolia')) {
+        userMessage = '🌐 Please switch to Base Sepolia network in your wallet.';
+      }
+      
+      showToast(userMessage, 'error');
+      alert(`NFT minting failed.\n\n${userMessage}`);
     } finally { 
       setButtonLoading(UI.generateNFTBtn, false); 
     }
@@ -271,7 +280,7 @@ const App = Object.assign({}, AppState, {
   },
 
   init() {
-    console.log("🚀 MULTICHAIN App initializing...");
+    console.log("🚀 Starting Wallet Visualizer...");
     initUI();
     resizeCanvas(this);
     
@@ -321,7 +330,8 @@ const App = Object.assign({}, AppState, {
     
     window.LOW_POWER_MODE = LOW_POWER_MODE;
     
-    console.log('✅ Dynamic Wallet Visualizer MULTICHAIN - Ready!');
+    showToast('✨ Welcome! Connect your wallet to begin.', 'info');
+    console.log('✅ Wallet Visualizer Ready!');
   }
 });
 
