@@ -7,11 +7,12 @@ import { showWarning, showToast, showProgress, setProgress, hideProgress, setBut
 import { stopAnimation, drawFrame, animate } from './visualizer.js';
 
 export function pickSupportedMimeType() {
-  // Prioritāte WEBM (universāls)
-  if (MediaRecorder.isTypeSupported('video/webm')) return 'video/webm';
-  if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) return 'video/webm;codecs=vp9';
-  if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) return 'video/webm;codecs=vp8';
-  if (MediaRecorder.isTypeSupported('video/mp4')) return 'video/mp4';
+  const candidates = ['video/webm', 'video/mp4'];
+  for (const c of candidates) { 
+    try { 
+      if (MediaRecorder.isTypeSupported(c)) return c; 
+    } catch (e) {} 
+  }
   return '';
 }
 
@@ -30,140 +31,135 @@ export function cleanupRecording(app, previousShowInfo, originalParticles = null
   showWarning('', false);
 }
 
-// 🔥 JAUNS: startRecording atgriež Promise ar { blob, mimeType }
 export async function startRecording(app) {
-  return new Promise(async (resolve, reject) => {
-    if (app.isRecording) {
-      reject(new Error('Already recording'));
-      return;
+  if (app.isRecording) return;
+  app.isRecording = true;
+  
+  showWarning('⚠️ Recording in progress...', true);
+  setButtonLoading(UI.recordBtn, true);
+  
+  const previousShowInfo = app.showInfo;
+  app.showInfo = false;
+  if (UI.tokenListContainer) UI.tokenListContainer.style.display = 'none';
+  
+  const originalParticles = app.particles;
+  if (window.LOW_POWER_MODE && app.particles.length > 40) {
+    app.particles = app.particles.slice(0, 40);
+  }
+  
+  // 🔥 NEPĀRTRAUC ANIMĀCIJU! Tikai paslēp info paneli
+  // stopAnimation(app); ← NOŅEMTS!
+  
+  let stream;
+  try { 
+    stream = UI.canvas.captureStream(30);
+  } catch (err) { 
+    showToast('Recording not supported', 'error'); 
+    cleanupRecording(app, previousShowInfo, originalParticles);
+    return; 
+  }
+  
+  const mime = pickSupportedMimeType();
+  let recorder;
+  try { 
+    recorder = new MediaRecorder(stream, { mimeType: mime });
+  } catch (err) { 
+    alert('Recording not available'); 
+    cleanupRecording(app, previousShowInfo, originalParticles); 
+    return; 
+  }
+  
+  const chunks = [];
+  let animationFrameId = null;
+  
+  // 🔥 Turpina animāciju ierakstīšanas laikā
+  function recordAnimation() {
+    if (!app.isRecording) return;
+    drawFrame(app, app.frameCount++, false);
+    animationFrameId = requestAnimationFrame(recordAnimation);
+  }
+  
+  recorder.ondataavailable = (e) => { 
+    if (e.data && e.data.size) chunks.push(e.data); 
+  };
+  
+  recorder.onerror = (ev) => { 
+    console.error(ev); 
+    showToast('Recording error', 'error'); 
+  };
+  
+  recorder.onstart = () => { 
+    showToast('Recording...', 'info'); 
+    // 🔥 Sāk animācijas loopu
+    recordAnimation(); 
+  };
+  
+  recorder.start(1000); // 🔥 Ieraksta 1 sekundes gabalos
+  
+  const startTime = performance.now();
+  const duration = 15000;
+  
+  const updateProgress = (timestamp) => {
+    const elapsed = timestamp - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    setProgress(progress * 100);
+    const seconds = Math.floor(elapsed / 1000);
+    UI.recordTimer.textContent = `Recording: ${seconds} / 15 s`;
+    if (elapsed < duration) {
+      requestAnimationFrame(updateProgress);
+    } else {
+      try { 
+        if (recorder.state === 'recording') recorder.stop(); 
+      } catch (e) {}
+    }
+  };
+  requestAnimationFrame(updateProgress);
+  
+  recorder.onstop = () => {
+    // 🔥 Aptur animācijas loopu
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
     }
     
-    app.isRecording = true;
+    const blob = new Blob(chunks, { type: chunks.length ? chunks[0].type : 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+    a.download = `visualization_${Date.now()}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { 
+      document.body.removeChild(a); 
+      URL.revokeObjectURL(url); 
+    }, 100);
     
-    showWarning('⚠️ Recording in progress...', true);
-    setButtonLoading(UI.recordBtn, true);
+    app.particles = originalParticles;
+    app.showInfo = previousShowInfo;
+    if (app.showInfo && UI.tokenListContainer) UI.tokenListContainer.style.display = 'block';
+    updateTokenListUI(app.tokens);
+    showToast('Recording finished!', 'success');
+    UI.recordTimer.textContent = 'Recording: 0 / 15 s';
+    hideProgress();
+    setButtonLoading(UI.recordBtn, false);
+    UI.renderBtn.disabled = false;
+    UI.connectBtn.disabled = false;
+    UI.generateNFTBtn.disabled = false;
+    app.isRecording = false;
+    showWarning('', false);
     
-    const previousShowInfo = app.showInfo;
-    app.showInfo = false;
-    if (UI.tokenListContainer) UI.tokenListContainer.style.display = 'none';
-    
-    const originalParticles = app.particles;
-    if (window.LOW_POWER_MODE && app.particles.length > 40) {
-      app.particles = app.particles.slice(0, 40);
+    // 🔥 Restartē normālu animāciju
+    if (app.animFrameId) cancelAnimationFrame(app.animFrameId);
+    animate(app);
+  };
+  
+  recorder.onerror = () => {
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
     }
-    
-    let stream;
-    try { 
-      stream = UI.canvas.captureStream(30);
-    } catch (err) { 
-      showToast('Recording not supported', 'error'); 
-      cleanupRecording(app, previousShowInfo, originalParticles);
-      reject(err);
-      return; 
-    }
-    
-    const mimeType = pickSupportedMimeType();
-    if (!mimeType) {
-      showToast('No supported video codec found', 'error');
-      cleanupRecording(app, previousShowInfo, originalParticles);
-      reject(new Error('No supported video codec'));
-      return;
-    }
-    
-    let recorder;
-    try { 
-      recorder = new MediaRecorder(stream, { mimeType });
-    } catch (err) { 
-      alert('Recording not available'); 
-      cleanupRecording(app, previousShowInfo, originalParticles); 
-      reject(err);
-      return; 
-    }
-    
-    const chunks = [];
-    let animationFrameId = null;
-    
-    function recordAnimation() {
-      if (!app.isRecording) return;
-      drawFrame(app, app.frameCount++, false);
-      animationFrameId = requestAnimationFrame(recordAnimation);
-    }
-    
-    recorder.ondataavailable = (e) => { 
-      if (e.data && e.data.size) chunks.push(e.data); 
-    };
-    
-    recorder.onerror = (ev) => { 
-      console.error(ev); 
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      app.isRecording = false;
-      showToast('Recording error', 'error');
-      reject(new Error('Recording error'));
-    };
-    
-    recorder.onstart = () => { 
-      showToast('Recording...', 'info'); 
-      recordAnimation(); 
-    };
-    
-    recorder.start(1000);
-    
-    const startTime = performance.now();
-    const duration = 15000;
-    
-    const updateProgress = (timestamp) => {
-      const elapsed = timestamp - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      setProgress(progress * 100);
-      const seconds = Math.floor(elapsed / 1000);
-      UI.recordTimer.textContent = `Recording: ${seconds} / 15 s`;
-      if (elapsed < duration) {
-        requestAnimationFrame(updateProgress);
-      } else {
-        try { 
-          if (recorder.state === 'recording') recorder.stop(); 
-        } catch (e) {}
-      }
-    };
-    requestAnimationFrame(updateProgress);
-    
-    recorder.onstop = () => {
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-      }
-      
-      const blob = new Blob(chunks, { type: mimeType });
-      
-      // 🔥 Atjauno stāvokli
-      app.particles = originalParticles;
-      app.showInfo = previousShowInfo;
-      if (app.showInfo && UI.tokenListContainer) UI.tokenListContainer.style.display = 'block';
-      updateTokenListUI(app.tokens);
-      
-      UI.recordTimer.textContent = 'Recording: 0 / 15 s';
-      hideProgress();
-      setButtonLoading(UI.recordBtn, false);
-      UI.renderBtn.disabled = false;
-      UI.connectBtn.disabled = false;
-      UI.generateNFTBtn.disabled = false;
-      app.isRecording = false;
-      showWarning('', false);
-      
-      if (app.animFrameId) cancelAnimationFrame(app.animFrameId);
-      animate(app);
-      
-      // 🔥 ATGRIEŽ blob un mimeType!
-      resolve({ blob, mimeType });
-    };
-    
-    recorder.onerror = () => {
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-      }
-      cleanupRecording(app, previousShowInfo, originalParticles);
-      reject(new Error('Recording failed'));
-    };
-  });
+    cleanupRecording(app, previousShowInfo, originalParticles);
+  };
 }
