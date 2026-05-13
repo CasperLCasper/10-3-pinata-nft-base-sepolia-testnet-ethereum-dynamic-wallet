@@ -6,7 +6,7 @@ import { CONTRACT_ABI, getMintProvider } from './config.js';
 import { MINT_CHAIN } from './chains.js';
 
 // Konfigurācija
-const DEFAULT_TIMEOUT_MS = 15000; // 15 sekundes
+const DEFAULT_TIMEOUT_MS = 15000;
 const RETRY_COUNT = 2;
 const RETRY_DELAY_MS = 1000;
 
@@ -15,11 +15,11 @@ async function safeJson(response) {
   try {
     return await response.json();
   } catch {
-    throw new Error('Invalid JSON response');
+    throw new Error('Invalid response from server');
   }
 }
 
-// 🔥 Safe error body reading (tikai pirmie baiti)
+// 🔥 Safe error body reading
 async function safeErrorText(response) {
   try {
     const reader = response.body?.getReader();
@@ -34,7 +34,7 @@ async function safeErrorText(response) {
   }
 }
 
-// Helper funkcija fetch ar timeout un retry (tikai GET un retryable kļūdām)
+// Helper funkcija fetch ar timeout un retry
 async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS, retries = RETRY_COUNT) {
   const method = (options.method || 'GET').toUpperCase();
   const canRetry = method === 'GET';
@@ -57,7 +57,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
       }
       
       if (response.status >= 500 && canRetry && attempt < retries) {
-        console.warn(`Request failed with ${response.status}, retrying (${attempt + 1}/${retries})...`);
+        console.warn(`Request failed, retrying...`);
         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * (attempt + 1)));
         continue;
       }
@@ -73,20 +73,20 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
         error instanceof TypeError;
       
       if (isRetryable && canRetry && attempt < retries) {
-        console.warn(`Request failed: ${error.message}, retrying (${attempt + 1}/${retries})...`);
+        console.warn(`Connection issue, retrying...`);
         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * (attempt + 1)));
         continue;
       }
       
       if (error.name === 'AbortError') {
-        throw new Error(`Request timeout after ${timeoutMs}ms`);
+        throw new Error('Request took too long. Please check your connection.');
       }
       
       throw error;
     }
   }
   
-  throw lastError || new Error('Request failed after retries');
+  throw lastError || new Error('Unable to complete request. Please try again.');
 }
 
 export async function apiFetch(url, options = {}) {
@@ -110,7 +110,7 @@ export async function apiFetch(url, options = {}) {
     localStorage.removeItem("auth_token");
     
     window.dispatchEvent(new CustomEvent("auth:expired", { 
-      detail: { message: "Session expired - please reconnect wallet" }
+      detail: { message: "Your session has expired. Please reconnect your wallet." }
     }));
     
     throw new Error("SESSION_EXPIRED");
@@ -118,7 +118,16 @@ export async function apiFetch(url, options = {}) {
   
   if (!response.ok) {
     const errorText = await safeErrorText(response);
-    throw new Error(`API error ${response.status}: ${errorText}`);
+    
+    if (response.status === 404) {
+      throw new Error('Service not available. Please try again later.');
+    } else if (response.status === 429) {
+      throw new Error('Too many requests. Please wait a moment and try again.');
+    } else if (response.status >= 500) {
+      throw new Error('Server issue. Please try again in a few moments.');
+    }
+    
+    throw new Error(`Unable to complete request (${response.status}). Please try again.`);
   }
   
   return response;
@@ -139,14 +148,14 @@ export async function login(signer, account) {
     
     if (!res.ok) {
       const errorText = await safeErrorText(res);
-      throw new Error(`Login failed: ${res.status} ${errorText}`);
+      throw new Error(`Login failed: ${errorText}`);
     }
     
     const data = await safeJson(res);
     
     if (data.token) {
       localStorage.setItem("auth_token", data.token);
-      console.log("✅ JWT token saved");
+      console.log("✅ Login successful");
       return true;
     }
     return false;
@@ -161,11 +170,11 @@ export async function getContractAddress() {
     const res = await fetchWithTimeout('/api/getContractAddress');
     
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
+      throw new Error(`Failed to get contract address`);
     }
     
     const data = await safeJson(res);
-    if (!data.address) throw new Error('No contract address');
+    if (!data.address) throw new Error('Contract address not found');
     return data.address;
   } catch (error) {
     console.error("Failed to get contract address:", error);
@@ -173,7 +182,6 @@ export async function getContractAddress() {
   }
 }
 
-// 🔥 Izmanto getMintProvider() (async) no config.js
 export async function getNFTPrice() {
   try {
     const contractAddress = await getContractAddress();
@@ -259,7 +267,7 @@ export async function getAllNFTs(account, chain) {
       if (!newPageKey) break;
       
       if (seenPageKeys.has(newPageKey)) {
-        console.warn('Duplicate pageKey detected, breaking pagination loop');
+        console.warn('Duplicate page detected, stopping');
         break;
       }
       seenPageKeys.add(newPageKey);
@@ -267,7 +275,7 @@ export async function getAllNFTs(account, chain) {
       pageKey = newPageKey;
     }
     
-    console.log(`✅ Total NFTs fetched from ${chain}: ${allNFTs.length}`);
+    console.log(`✅ Loaded ${allNFTs.length} NFTs from ${chain}`);
     
     return allNFTs.map(nft => ({
       address: nft.contract?.address || nft.contractAddress || nft.address || '',
