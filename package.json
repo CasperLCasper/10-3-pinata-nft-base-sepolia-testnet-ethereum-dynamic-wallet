@@ -2,18 +2,22 @@
   "name": "wallet-visualizer",
   "version": "1.0.0",
   "type": "module",
-  "dependencies": {
-    "ethers": "^6.10.0",
-    "jsonwebtoken": "^9.0.2",
-    "node-fetch": "^3.3.2",
-    "pinata": "^2.1.0"
-  },
+  "private": true,
+  "description": "Wallet visualization and NFT video pipeline",
+
   "scripts": {
     "dev": "vercel dev",
     "start": "vercel dev",
-    "build": "echo 'No build step needed'"
+    "build": "echo \"No build step needed\""
   },
+
+  "dependencies": {
+    "ethers": "^6.10.0",
+    "jsonwebtoken": "^9.0.2",
+    "pinata": "^2.1.0"
+  },
+
   "engines": {
-    "node": ">=18"
+    "node": ">=18 <21"
   }
 }
