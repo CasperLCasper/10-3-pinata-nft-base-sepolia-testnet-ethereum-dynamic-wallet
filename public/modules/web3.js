@@ -5,7 +5,7 @@
 import { VIZ_CHAINS, MINT_CHAIN, getAllRpcUrls } from './chains.js';
 import { UI } from './state.js';
 import { showToast, setButtonLoading, showProgress, hideProgress } from './ui.js';
-import { login, getNFTPrice, getContractAddress } from './api.js';
+import { login, getNFTPrice } from './api.js';
 
 export async function updateChainStatus() {
   if (!window.ethereum || !UI.chainStatus) return;
@@ -15,6 +15,7 @@ export async function updateChainStatus() {
     const selectedChainKey = UI.chainSelect.value;
     const selectedChain = VIZ_CHAINS[selectedChainKey];
     
+    // 🔥 Salīdzina HEX stringus, nevis decimālos skaitļus
     if (selectedChain && chainIdHex === selectedChain.chainIdHex) {
       UI.chainStatus.className = 'chain-status connected';
       UI.chainStatus.title = '✓ Connected to selected network';
@@ -32,17 +33,17 @@ export async function switchToMintChain() {
   try {
     await window.ethereum.request({
       method: 'wallet_switchEthereumChain',
-      params: [{ chainId: MINT_CHAIN.chainIdHex }]
+      params: [{ chainId: MINT_CHAIN.chainIdHex }]  // 🔥 HEX, nevis decimāls
     });
   } catch (error) {
     if (error.code === 4902) {
       await window.ethereum.request({
         method: 'wallet_addEthereumChain',
         params: [{
-          chainId: MINT_CHAIN.chainIdHex,
+          chainId: MINT_CHAIN.chainIdHex,  // 🔥 HEX
           chainName: MINT_CHAIN.name,
           nativeCurrency: { name: MINT_CHAIN.nativeCurrency, symbol: MINT_CHAIN.nativeCurrency, decimals: 18 },
-          rpcUrls: getAllRpcUrls('baseSepolia'),
+          rpcUrls: getAllRpcUrls('baseSepolia'),  // 🔥 Izmanto helper no chains.js
           blockExplorerUrls: [MINT_CHAIN.blockExplorer]
         }]
       });
@@ -56,17 +57,18 @@ export async function switchToVizChain(chainIdHex) {
   try {
     await window.ethereum.request({
       method: 'wallet_switchEthereumChain',
-      params: [{ chainId: chainIdHex }]
+      params: [{ chainId: chainIdHex }]  // 🔥 Parametrs jau ir HEX
     });
     await updateChainStatus();
   } catch (error) {
     if (error.code === 4902) {
+      // 🔥 Meklē pēc chainIdHex, nevis decimālā chainId
       const chainConfig = Object.values(VIZ_CHAINS).find(c => c.chainIdHex === chainIdHex);
       if (chainConfig) {
         await window.ethereum.request({
           method: 'wallet_addEthereumChain',
           params: [{
-            chainId: chainConfig.chainIdHex,
+            chainId: chainConfig.chainIdHex,  // 🔥 HEX
             chainName: chainConfig.name,
             nativeCurrency: { name: chainConfig.nativeCurrency, symbol: chainConfig.nativeCurrency, decimals: 18 },
             rpcUrls: Array.isArray(chainConfig.rpc) ? chainConfig.rpc : [chainConfig.rpc],
@@ -78,37 +80,6 @@ export async function switchToVizChain(chainIdHex) {
     } else {
       throw error;
     }
-  }
-}
-
-// 🔥 Pārbauda bilanci uz Base Sepolia un atjaunina displeju
-async function updateBalanceDisplay(account, provider) {
-  const balanceDisplay = document.getElementById('balanceDisplay');
-  if (!balanceDisplay) return;
-  
-  try {
-    balanceDisplay.textContent = '💰 Checking balance...';
-    balanceDisplay.className = 'balance-display checking';
-    
-    const contractAddress = await getContractAddress();
-    const contract = new ethers.Contract(contractAddress, ["function mintPrice() view returns (uint256)"], provider);
-    const mintPriceWei = await contract.mintPrice();
-    const balanceWei = await provider.getBalance(account);
-    
-    const balanceEth = parseFloat(ethers.formatEther(balanceWei)).toFixed(5);
-    const mintPriceEth = parseFloat(ethers.formatEther(mintPriceWei)).toFixed(5);
-    
-    if (balanceWei >= mintPriceWei) {
-      balanceDisplay.textContent = `💰 Base: ${balanceEth} ETH (sufficient for mint)`;
-      balanceDisplay.className = 'balance-display sufficient';
-    } else {
-      balanceDisplay.textContent = `⚠️ Base: ${balanceEth} ETH (need ${mintPriceEth} ETH to mint)`;
-      balanceDisplay.className = 'balance-display insufficient';
-    }
-  } catch (error) {
-    console.error("Balance check failed:", error);
-    balanceDisplay.textContent = `❌ Base: Unable to check balance`;
-    balanceDisplay.className = 'balance-display insufficient';
   }
 }
 
@@ -129,6 +100,7 @@ export async function connectWallet(app) {
       throw new Error('Invalid chain selected');
     }
     
+    // 🔥 Nodod chainIdHex, nevis decimālo chainId
     await switchToVizChain(vizChainConfig.chainIdHex);
     
     const provider = new ethers.BrowserProvider(window.ethereum);
@@ -156,9 +128,6 @@ export async function connectWallet(app) {
     UI.generateNFTBtn.setAttribute('data-price', price);
     
     await updateChainStatus();
-    
-    // 🔥 Pārbauda bilanci uz Base Sepolia
-    await updateBalanceDisplay(account, provider);
     
     const tokenCount = app.tokens.filter(t => !t.isNFT).length;
     showToast(`Connected to ${vizChainConfig.name}! Loaded ${app.tokens.length} assets (${tokenCount} tokens, ${app.nftCenters.length} NFTs)`, 'success');
