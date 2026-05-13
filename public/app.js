@@ -169,7 +169,8 @@ const App = Object.assign({}, AppState, {
       
       const metadata = {
         name: "Wallet Visualization NFT",
-        description: `Generated from wallet ${this.account.substring(0, 6)}...${this.account.substring(-4)} on ${new Date().toISOString()}`,
+        // 🔥 PILNA ADRESE (nesaīsināta)
+        description: `Generated from wallet ${this.account} on ${new Date().toISOString()}`,
         image: `${PINATA_GATEWAY}${cleanImageCID}`,
         attributes: [
           { trait_type: "ETH Balance", value: this.ethBalance.toString() },
