@@ -147,7 +147,8 @@ export async function connectWallet(app) {
     app.signer = signer;
     app.account = account;
     
-    UI.accountDisplay.textContent = `Connected: ${account.slice(0, 10)}...${account.slice(-6)}`;
+    // 🔥 PILNA ADRESE (nesaīsināta)
+    UI.accountDisplay.textContent = `Connected account: ${account}`;
     
     const loginSuccess = await login(signer, account);
     if (!loginSuccess) {
@@ -164,7 +165,6 @@ export async function connectWallet(app) {
     
     await updateChainStatus();
     
-    // Check balance on Base Sepolia
     await updateBalanceDisplay(account);
     
     const tokenCount = app.tokens.filter(t => !t.isNFT).length;
