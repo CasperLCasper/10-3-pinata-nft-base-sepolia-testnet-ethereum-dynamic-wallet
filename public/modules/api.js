@@ -1,0 +1,283 @@
+// ============================================ //
+// API FUNCTIONS
+// ============================================ //
+
+import { CONTRACT_ABI, getMintProvider } from './config.js';
+import { MINT_CHAIN } from './chains.js';
+
+// Konfigurācija
+const DEFAULT_TIMEOUT_MS = 15000; // 15 sekundes
+const RETRY_COUNT = 2;
+const RETRY_DELAY_MS = 1000;
+
+// 🔥 Safe JSON parsing
+async function safeJson(response) {
+  try {
+    return await response.json();
+  } catch {
+    throw new Error('Invalid JSON response');
+  }
+}
+
+// 🔥 Safe error body reading (tikai pirmie baiti)
+async function safeErrorText(response) {
+  try {
+    const reader = response.body?.getReader();
+    if (!reader) return '';
+    
+    const { value } = await reader.read();
+    if (!value) return '';
+    
+    return new TextDecoder().decode(value).substring(0, 200);
+  } catch {
+    return '';
+  }
+}
+
+// Helper funkcija fetch ar timeout un retry (tikai GET un retryable kļūdām)
+async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS, retries = RETRY_COUNT) {
+  const method = (options.method || 'GET').toUpperCase();
+  const canRetry = method === 'GET';
+  
+  let lastError;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        return response;
+      }
+      
+      if (response.status >= 500 && canRetry && attempt < retries) {
+        console.warn(`Request failed with ${response.status}, retrying (${attempt + 1}/${retries})...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * (attempt + 1)));
+        continue;
+      }
+      
+      return response;
+      
+    } catch (error) {
+      clearTimeout(timeoutId);
+      lastError = error;
+      
+      const isRetryable = 
+        error.name === 'AbortError' ||
+        error instanceof TypeError;
+      
+      if (isRetryable && canRetry && attempt < retries) {
+        console.warn(`Request failed: ${error.message}, retrying (${attempt + 1}/${retries})...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * (attempt + 1)));
+        continue;
+      }
+      
+      if (error.name === 'AbortError') {
+        throw new Error(`Request timeout after ${timeoutMs}ms`);
+      }
+      
+      throw error;
+    }
+  }
+  
+  throw lastError || new Error('Request failed after retries');
+}
+
+export async function apiFetch(url, options = {}) {
+  const token = localStorage.getItem("auth_token");
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers
+  };
+  
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  
+  const response = await fetchWithTimeout(url, { 
+    ...options, 
+    headers 
+  });
+  
+  if (response.status === 401) {
+    console.warn("Session expired");
+    localStorage.removeItem("auth_token");
+    
+    window.dispatchEvent(new CustomEvent("auth:expired", { 
+      detail: { message: "Session expired - please reconnect wallet" }
+    }));
+    
+    throw new Error("SESSION_EXPIRED");
+  }
+  
+  if (!response.ok) {
+    const errorText = await safeErrorText(response);
+    throw new Error(`API error ${response.status}: ${errorText}`);
+  }
+  
+  return response;
+}
+
+export async function login(signer, account) {
+  if (!signer) return false;
+  
+  try {
+    const message = `Login to NFT app: ${Date.now()}`;
+    const signature = await signer.signMessage(message);
+    
+    const res = await fetchWithTimeout('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: account, message, signature })
+    });
+    
+    if (!res.ok) {
+      const errorText = await safeErrorText(res);
+      throw new Error(`Login failed: ${res.status} ${errorText}`);
+    }
+    
+    const data = await safeJson(res);
+    
+    if (data.token) {
+      localStorage.setItem("auth_token", data.token);
+      console.log("✅ JWT token saved");
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error("Login error:", error);
+    return false;
+  }
+}
+
+export async function getContractAddress() {
+  try {
+    const res = await fetchWithTimeout('/api/getContractAddress');
+    
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    
+    const data = await safeJson(res);
+    if (!data.address) throw new Error('No contract address');
+    return data.address;
+  } catch (error) {
+    console.error("Failed to get contract address:", error);
+    return null;
+  }
+}
+
+// 🔥 Izmanto getMintProvider() (async) no config.js
+export async function getNFTPrice() {
+  try {
+    const contractAddress = await getContractAddress();
+    if (!contractAddress) return "Price unavailable";
+    
+    const provider = await getMintProvider();
+    const contract = new ethers.Contract(contractAddress, CONTRACT_ABI, provider);
+    const priceWei = await contract.mintPrice();
+    const priceEth = ethers.formatEther(priceWei);
+    
+    return `${priceEth} ETH + gas`;
+  } catch (error) {
+    console.error("Failed to get NFT price:", error);
+    return "Price unavailable";
+  }
+}
+
+export async function getTokens(account, chain) {
+  if (!account) return [];
+  try {
+    const url = `/api/getTokens?account=${encodeURIComponent(account)}&chain=${chain}`;
+    const res = await apiFetch(url);
+    
+    const data = await safeJson(res);
+    
+    if (!data?.tokens) return [];
+    
+    return data.tokens.map(t => {
+      const decimals = t.decimals || 18;
+      const rawBalance = t.balance || "0";
+      
+      let formattedBalance = 0;
+      try {
+        formattedBalance = Number(ethers.formatUnits(rawBalance, decimals));
+        if (!Number.isFinite(formattedBalance)) {
+          formattedBalance = 0;
+        }
+      } catch {
+        formattedBalance = 0;
+      }
+      
+      return {
+        address: t.contract || t.contractAddress || "",
+        balance: formattedBalance,
+        symbol: t.symbol || 'TKN',
+        isNFT: false
+      };
+    }).filter(t => t.balance > 0);
+  } catch(e) { 
+    console.error("GetTokens Error:", e); 
+    return []; 
+  }
+}
+
+export async function getAllNFTs(account, chain) {
+  if (!account) return [];
+  try {
+    const allNFTs = [];
+    let pageKey = null;
+    const MAX_PAGES = 10;
+    const seenPageKeys = new Set();
+    
+    for (let i = 0; i < MAX_PAGES; i++) {
+      let url = `/api/getAllNFTs?account=${encodeURIComponent(account)}&chain=${chain}`;
+      if (pageKey) {
+        url += `&pageKey=${pageKey}`;
+      }
+      
+      const res = await apiFetch(url);
+      const data = await safeJson(res);
+      
+      let nfts = [];
+      if (data?.result?.nfts) nfts = data.result.nfts;
+      else if (data?.nfts) nfts = data.nfts;
+      else if (Array.isArray(data)) nfts = data;
+      
+      if (!nfts || nfts.length === 0) break;
+      
+      allNFTs.push(...nfts);
+      
+      const newPageKey = data?.result?.pageKey || data?.pageKey;
+      
+      if (!newPageKey) break;
+      
+      if (seenPageKeys.has(newPageKey)) {
+        console.warn('Duplicate pageKey detected, breaking pagination loop');
+        break;
+      }
+      seenPageKeys.add(newPageKey);
+      
+      pageKey = newPageKey;
+    }
+    
+    console.log(`✅ Total NFTs fetched from ${chain}: ${allNFTs.length}`);
+    
+    return allNFTs.map(nft => ({
+      address: nft.contract?.address || nft.contractAddress || nft.address || '',
+      symbol: nft.contract?.symbol || nft.symbol || 'NFT',
+      balance: 1,
+      isNFT: true,
+      tokenId: nft.id?.tokenId || nft.tokenId || nft.id || ''
+    }));
+  } catch(e) { 
+    console.error("GetAllNFTs Error:", e); 
+    return []; 
+  }
+}
