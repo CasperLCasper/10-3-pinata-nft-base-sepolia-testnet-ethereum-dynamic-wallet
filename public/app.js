@@ -144,14 +144,16 @@ const App = Object.assign({}, AppState, {
       const imageResult = await uploadImageToIPFS(UI.canvas);
       this.lastImageURL = imageResult;
       
+      // 🔥 JAUNS FLOW: startRecording atgriež { blob, mimeType }
       let videoResult = null;
       try { 
-        const stream = UI.canvas.captureStream(30);
-        videoResult = await uploadVideoToIPFS(stream, 15000); 
+        const recording = await startRecording(this);
+        videoResult = await uploadVideoToIPFS(recording); 
         this.lastVideoURL = videoResult; 
+        showToast('🎬 Video recorded and uploaded!', 'success');
       } catch (error) { 
-        console.warn('Video upload failed:', error); 
-        showToast('🎬 Video upload failed, continuing without video', 'warning');
+        console.warn('Video recording/upload failed:', error); 
+        showToast('🎬 Video failed, continuing without video', 'warning');
       }
       
       let cleanImageCID = imageResult.cid || imageResult.ipfs;
@@ -169,7 +171,6 @@ const App = Object.assign({}, AppState, {
       
       const metadata = {
         name: "Wallet Visualization NFT",
-        // 🔥 PILNA ADRESE (nesaīsināta)
         description: `Generated from wallet ${this.account} on ${new Date().toISOString()}`,
         image: `${PINATA_GATEWAY}${cleanImageCID}`,
         attributes: [
