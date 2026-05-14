@@ -1,188 +1,92 @@
-// ============================================ //
-// WEB3 FUNCTIONS
-// ============================================ //
+import { showToast } from './ui.js';
 
-import { VIZ_CHAINS, MINT_CHAIN, getAllRpcUrls } from './chains.js';
-import { UI } from './state.js';
-import { showToast, setButtonLoading, showProgress, hideProgress } from './ui.js';
-import { login, getNFTPrice, getContractAddress } from './api.js';
+// Mainīgie, kas glabās savienojuma stāvokli
+let provider = null;
+let signer = null;
+let userAddress = null;
 
-export async function updateChainStatus() {
-  if (!window.ethereum || !UI.chainStatus) return;
-  
-  try {
-    const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
-    const selectedChainKey = UI.chainSelect.value;
-    const selectedChain = VIZ_CHAINS[selectedChainKey];
-    
-    if (selectedChain && chainIdHex === selectedChain.chainIdHex) {
-      UI.chainStatus.className = 'chain-status connected';
-      UI.chainStatus.title = '✓ Connected to correct network';
-    } else {
-      UI.chainStatus.className = 'chain-status disconnected';
-      UI.chainStatus.title = '⚠️ Please switch network in your wallet';
-    }
-  } catch (error) {
-    UI.chainStatus.className = 'chain-status disconnected';
-    UI.chainStatus.title = '❌ Unable to detect network';
-  }
-}
-
-export async function switchToMintChain() {
-  try {
-    await window.ethereum.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: MINT_CHAIN.chainIdHex }]
-    });
-  } catch (error) {
-    if (error.code === 4902) {
-      await window.ethereum.request({
-        method: 'wallet_addEthereumChain',
-        params: [{
-          chainId: MINT_CHAIN.chainIdHex,
-          chainName: MINT_CHAIN.name,
-          nativeCurrency: { name: MINT_CHAIN.nativeCurrency, symbol: MINT_CHAIN.nativeCurrency, decimals: 18 },
-          rpcUrls: getAllRpcUrls('baseSepolia'),
-          blockExplorerUrls: [MINT_CHAIN.blockExplorer]
-        }]
-      });
-    } else {
-      throw error;
-    }
-  }
-}
-
-export async function switchToVizChain(chainIdHex) {
-  try {
-    await window.ethereum.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: chainIdHex }]
-    });
-    await updateChainStatus();
-  } catch (error) {
-    if (error.code === 4902) {
-      const chainConfig = Object.values(VIZ_CHAINS).find(c => c.chainIdHex === chainIdHex);
-      if (chainConfig) {
-        await window.ethereum.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: chainConfig.chainIdHex,
-            chainName: chainConfig.name,
-            nativeCurrency: { name: chainConfig.nativeCurrency, symbol: chainConfig.nativeCurrency, decimals: 18 },
-            rpcUrls: Array.isArray(chainConfig.rpc) ? chainConfig.rpc : [chainConfig.rpc],
-            blockExplorerUrls: [chainConfig.blockExplorer]
-          }]
-        });
-        await updateChainStatus();
-      }
-    } else {
-      throw error;
-    }
-  }
-}
-
-// 🔥 Pārbauda bilanci un atjaunina displeju
-async function updateBalanceDisplay(account) {
-  const balanceDisplay = document.getElementById('balanceDisplay');
-  if (!balanceDisplay) return;
-  
-  try {
-    balanceDisplay.textContent = '💰 Checking balance...';
-    balanceDisplay.className = 'balance-display checking';
-    
-    const baseProvider = new ethers.JsonRpcProvider('https://sepolia.base.org');
-    const contractAddress = await getContractAddress();
-    
-    if (!contractAddress) {
-      throw new Error('Contract not found');
-    }
-    
-    const contract = new ethers.Contract(contractAddress, ["function mintPrice() view returns (uint256)"], baseProvider);
-    const mintPriceWei = await contract.mintPrice();
-    const balanceWei = await baseProvider.getBalance(account);
-    
-    const balanceEth = parseFloat(ethers.formatEther(balanceWei)).toFixed(5);
-    const mintPriceEth = parseFloat(ethers.formatEther(mintPriceWei)).toFixed(5);
-    
-    if (balanceWei >= mintPriceWei) {
-      balanceDisplay.textContent = `✅ Base: ${balanceEth} ETH (enough to mint)`;
-      balanceDisplay.className = 'balance-display sufficient';
-    } else {
-      balanceDisplay.textContent = `⚠️ Base: ${balanceEth} ETH (need ${mintPriceEth} ETH to mint)`;
-      balanceDisplay.className = 'balance-display insufficient';
-    }
-  } catch (error) {
-    console.error("Balance check failed:", error);
-    balanceDisplay.textContent = `❌ Unable to check balance. Please refresh.`;
-    balanceDisplay.className = 'balance-display insufficient';
-  }
-}
-
-export async function connectWallet(app) {
-  setButtonLoading(UI.connectBtn, true);
-  showProgress();
-  
-  try {
+/**
+ * Pieslēdzas MetaMask vai citam EIP-1193 maciņam
+ */
+export async function connectWallet() {
     if (!window.ethereum) {
-      alert('Please install a wallet like MetaMask, Rabby, or Enkrypt to use this app.');
-      return;
+        showToast("MetaMask netika atrasts! Lūdzu, uzstādiet to.", "warning");
+        return null;
     }
-    
-    app.currentVizChain = UI.chainSelect.value;
-    const vizChainConfig = VIZ_CHAINS[app.currentVizChain];
-    
-    if (!vizChainConfig) {
-      showToast('Please select a valid blockchain network', 'warning');
-      throw new Error('Invalid chain selected');
+
+    try {
+        // 1. Izveidojam ethers provider (v6 sintakse)
+        provider = new ethers.BrowserProvider(window.ethereum);
+        
+        // 2. Pieprasām kontus
+        const accounts = await provider.send("eth_requestAccounts", []);
+        
+        // 3. Dabūjam parakstītāju (signer)
+        signer = await provider.getSigner();
+        userAddress = accounts[0];
+
+        showToast(`Maciņš pievienots: ${userAddress.substring(0, 6)}...`, "success");
+        return userAddress;
+    } catch (error) {
+        console.error("Maciņa pieslēgšanas kļūda:", error);
+        showToast("Neizdevās pieslēgt maciņu", "error");
+        return null;
     }
-    
-    await switchToVizChain(vizChainConfig.chainIdHex);
-    
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send("eth_requestAccounts", []);
-    const signer = await provider.getSigner();
-    const account = await signer.getAddress();
-    
-    app.provider = provider;
-    app.signer = signer;
-    app.account = account;
-    
-    // 🔥 PILNA ADRESE (nesaīsināta)
-    UI.accountDisplay.textContent = `Connected account: ${account}`;
-    
-    const loginSuccess = await login(signer, account);
-    if (!loginSuccess) {
-      console.warn("Login failed, but continuing with visualization");
+}
+
+/**
+ * NFT Mintošanas funkcija
+ * @param {Object} metadataURL - Objekts ar .ipfs saiti no ipfs.js
+ */
+export async function mintNFT(metadataURL) {
+    if (!signer) {
+        showToast("Vispirms pieslēdziet maciņu!", "warning");
+        return;
     }
-    
-    await app.renderSnapshot(app.currentVizChain);
-    
-    UI.recordBtn.disabled = false;
-    UI.generateNFTBtn.disabled = false;
-    
-    const price = await getNFTPrice();
-    UI.generateNFTBtn.setAttribute('data-price', price);
-    
-    await updateChainStatus();
-    
-    await updateBalanceDisplay(account);
-    
-    const tokenCount = app.tokens.filter(t => !t.isNFT).length;
-    showToast(`✅ Connected to ${vizChainConfig.name}! Loaded ${app.tokens.length} assets (${tokenCount} tokens, ${app.nftCenters.length} NFTs)`, 'success');
-    
-  } catch (err) { 
-    console.error(err);
-    
-    let userMessage = 'Unable to connect wallet. Please try again.';
-    if (err.message && err.message.includes('User rejected')) {
-      userMessage = 'You cancelled the connection. Please approve to continue.';
-    } else if (err.message && err.message.includes('Already processing')) {
-      userMessage = 'Please wait, wallet is busy. Try again in a moment.';
+
+    if (!metadataURL || !metadataURL.ipfs) {
+        showToast("Trūkst metadatu saites!", "error");
+        return;
     }
-    
-    showToast(userMessage, 'error'); 
-  } finally { 
-    setButtonLoading(UI.connectBtn, false); 
-    hideProgress(); 
-  }
+
+    try {
+        showToast("Apstipriniet transakciju maciņā...", "info");
+
+        // ŠEIT TEV JĀIEVIETO TAVA LĪGUMA ADRESE UN ABI
+        const contractAddress = "TAVA_LĪGUMA_ADRESE_ŠEIT";
+        const contractABI = [
+            "function safeMint(address to, string uri) public"
+        ];
+
+        const contract = new ethers.Contract(contractAddress, contractABI, signer);
+
+        // Izsaucam mintošanas funkciju (izmantojot IPFS saiti no metadatiem)
+        const tx = await contract.safeMint(userAddress, metadataURL.ipfs);
+        
+        showToast("Transakcija nosūtīta! Gaidām apstiprinājumu...", "info");
+        
+        const receipt = await tx.wait();
+        console.log("Transakcijas rezultāts:", receipt);
+        
+        showToast("NFT veiksmīgi izkalts (minted)!", "success");
+        return receipt;
+
+    } catch (error) {
+        console.error("Mintošanas kļūda:", error);
+        
+        // Specifisku kļūdu apstrāde
+        if (error.code === 'ACTION_REJECTED') {
+            showToast("Lietotājs noraidīja transakciju", "warning");
+        } else {
+            showToast("Mintošana neizdevās. Pārbaudi konsoli.", "error");
+        }
+        return null;
+    }
+}
+
+/**
+ * Atgriež pašreizējo adresi, ja tāda ir
+ */
+export function getAddress() {
+    return userAddress;
 }
