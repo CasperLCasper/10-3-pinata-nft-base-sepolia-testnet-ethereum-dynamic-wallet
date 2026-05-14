@@ -21,20 +21,24 @@ export function isMP4Supported() {
     }
   }
   
+  console.log('⚠️ MP4 recording not supported, will use WebM + convert');
   return false;
 }
 
 // 🔥 Konvertē WebM → MP4 izmantojot Canvas + MediaRecorder
 export async function convertWebMToMP4(webmBlob) {
+  console.log('🔄 convertWebMToMP4 called, blob size:', (webmBlob.size / 1024).toFixed(0), 'KB');
+  
   return new Promise((resolve, reject) => {
-    console.log('🔄 Converting WebM to MP4 via Canvas...');
-    
     const video = document.createElement('video');
     video.src = URL.createObjectURL(webmBlob);
     video.muted = true;
     video.playsInline = true;
+    video.preload = 'auto';
     
     video.onloadedmetadata = () => {
+      console.log('📹 Video metadata loaded:', video.videoWidth, 'x', video.videoHeight);
+      
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -42,10 +46,17 @@ export async function convertWebMToMP4(webmBlob) {
       
       const stream = canvas.captureStream(30);
       
-      // Izmanto WebM ierakstīšanai (jo MP4 parasti nav atbalstīts)
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9'
-        : 'video/webm';
+      // 🔥 IERAKSTA MP4, JA ATBALSTA
+      let mimeType;
+      if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) {
+        mimeType = 'video/mp4;codecs=avc1';
+      } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+        mimeType = 'video/mp4';
+      } else {
+        mimeType = 'video/webm;codecs=vp9';
+      }
+      
+      console.log('🎬 Recording with mimeType:', mimeType);
       
       const recorder = new MediaRecorder(stream, {
         mimeType: mimeType,
@@ -59,35 +70,48 @@ export async function convertWebMToMP4(webmBlob) {
       };
       
       recorder.onstop = () => {
-        // 🔥 Izvade tiek saglabāta kā MP4 (lai gan iekšā ir WebM kodeks)
-        const mp4Blob = new Blob(chunks, { type: 'video/mp4' });
-        console.log(`✅ Done: ${(webmBlob.size / 1024).toFixed(0)}KB → ${(mp4Blob.size / 1024).toFixed(0)}KB`);
+        const outputBlob = new Blob(chunks, { type: 'video/mp4' });
+        console.log('✅ Conversion done! Output size:', (outputBlob.size / 1024).toFixed(0), 'KB');
+        console.log('✅ Output type:', outputBlob.type);
         URL.revokeObjectURL(video.src);
-        resolve(mp4Blob);
+        resolve(outputBlob);
       };
       
       recorder.onerror = (err) => {
+        console.error('❌ Recorder error:', err);
         URL.revokeObjectURL(video.src);
         reject(err);
       };
       
-      video.play();
-      recorder.start(1000);
+      video.play().then(() => {
+        console.log('▶️ Video playing');
+        recorder.start(1000);
+        
+        const drawFrame = () => {
+          if (video.ended || video.paused) {
+            console.log('⏹️ Video ended, stopping recorder');
+            recorder.stop();
+            return;
+          }
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          requestAnimationFrame(drawFrame);
+        };
+        
+        drawFrame();
+      }).catch(err => {
+        console.error('❌ Video play failed:', err);
+        URL.revokeObjectURL(video.src);
+        reject(err);
+      });
       
-      const drawFrame = () => {
-        if (video.ended || video.paused) {
-          recorder.stop();
-          return;
-        }
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        requestAnimationFrame(drawFrame);
+      video.onended = () => {
+        console.log('📼 Video onended fired');
+        if (recorder.state === 'recording') recorder.stop();
       };
-      
-      video.onended = () => recorder.stop();
-      drawFrame();
     };
     
     video.onerror = (err) => {
+      console.error('❌ Video load error:', err);
       URL.revokeObjectURL(video.src);
       reject(err);
     };
