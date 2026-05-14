@@ -97,7 +97,7 @@ export async function uploadImageToIPFS(canvas) {
   });
 }
 
-// 🔥 JAUNĀ VIDEO UPLOAD FUNKCIJA AR MP4 KONVERTĒŠANU
+// 🔥 GALVENĀ VIDEO UPLOAD FUNKCIJA
 export async function uploadVideoToIPFS(stream, duration = 15000) {
   showToast('Checking video format support...', 'info');
   
@@ -134,6 +134,7 @@ export async function uploadVideoToIPFS(stream, duration = 15000) {
     recorder.onstop = async () => {
       try {
         const recordedBlob = new Blob(chunks, { type: mimeType });
+        console.log(`📹 Recorded ${fileExtension.toUpperCase()} size: ${(recordedBlob.size / 1024 / 1024).toFixed(2)}MB`);
         
         let finalFile;
         
@@ -144,11 +145,11 @@ export async function uploadVideoToIPFS(stream, duration = 15000) {
           try {
             const mp4Blob = await convertWebMToMP4(recordedBlob);
             finalFile = new File([mp4Blob], `video_${Date.now()}.mp4`, { type: 'video/mp4' });
-            showToast('Conversion successful!', 'success');
+            showToast('✅ Conversion successful!', 'success');
           } catch (conversionError) {
             console.error('Conversion failed:', conversionError);
             // Fallback: sūta oriģinālo WebM
-            showToast('Conversion failed, uploading original WebM...', 'warning');
+            showToast('⚠️ Conversion failed, uploading original WebM...', 'warning');
             finalFile = new File([recordedBlob], `video_${Date.now()}.webm`, { type: 'video/webm' });
           }
         } else {
@@ -156,11 +157,13 @@ export async function uploadVideoToIPFS(stream, duration = 15000) {
           finalFile = new File([recordedBlob], `video_${Date.now()}.mp4`, { type: 'video/mp4' });
         }
         
-        // 4. Augšupielādē failu (viemmēr MP4 vai fallback WebM)
-        showToast('Uploading video to IPFS...', 'info');
+        // 4. Augšupielādē failu uz Pinata IPFS
+        showToast(`Uploading ${finalFile.type} to IPFS...`, 'info');
         const result = await uploadFileToIPFS(finalFile);
         
-        console.log(`✅ Video uploaded: ${result.cid} (${finalFile.type})`);
+        console.log(`✅ Video uploaded to IPFS: ${result.cid} (${finalFile.type}, ${(finalFile.size / 1024 / 1024).toFixed(2)}MB)`);
+        showToast('✅ Video uploaded to IPFS!', 'success');
+        
         resolve(result);
         
       } catch (error) {
@@ -169,7 +172,10 @@ export async function uploadVideoToIPFS(stream, duration = 15000) {
       }
     };
     
-    recorder.onerror = (err) => reject(err);
+    recorder.onerror = (err) => {
+      console.error('Recording error:', err);
+      reject(err);
+    };
     
     // Sāk ierakstīšanu
     recorder.start(1000);
