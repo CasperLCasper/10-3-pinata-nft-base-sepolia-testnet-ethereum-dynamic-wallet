@@ -1,40 +1,7 @@
 // ============================================ //
-// VIDEO CONVERTER - WebM to MP4 in Browser
-// FFmpeg.wasm UMD versija (bez worker/ESM)
+// VIDEO CONVERTER - WebM to MP4 via Canvas
+// BEZ FFMPEG! Tikai browsera iebūvētie API
 // ============================================ //
-
-let ffmpeg = null;
-let isFFmpegLoaded = false;
-
-async function initFFmpeg() {
-  if (isFFmpegLoaded && ffmpeg) return ffmpeg;
-  
-  console.log('🔄 Loading FFmpeg.wasm (UMD, no worker)...');
-  
-  // Ielādē UMD versiju kā script (globāls FFmpeg)
-  if (!window.FFmpegWASM) {
-    await new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js';
-      script.onload = resolve;
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
-  }
-  
-  const { FFmpeg: FFmpegClass } = window.FFmpegWASM;
-  ffmpeg = new FFmpegClass();
-  
-  await ffmpeg.load({
-    coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
-    wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm'
-  });
-  
-  isFFmpegLoaded = true;
-  console.log('✅ FFmpeg.wasm loaded (UMD)');
-  
-  return ffmpeg;
-}
 
 export function isMP4Supported() {
   const mp4Codecs = [
@@ -57,39 +24,72 @@ export function isMP4Supported() {
   return false;
 }
 
+// 🔥 Konvertē WebM → MP4 izmantojot Canvas + MediaRecorder
 export async function convertWebMToMP4(webmBlob) {
-  try {
-    console.log('🔄 Converting WebM to MP4...');
+  return new Promise((resolve, reject) => {
+    console.log('🔄 Converting WebM to MP4 via Canvas...');
     
-    const ffmpegInstance = await initFFmpeg();
+    const video = document.createElement('video');
+    video.src = URL.createObjectURL(webmBlob);
+    video.muted = true;
+    video.playsInline = true;
     
-    const inputData = new Uint8Array(await webmBlob.arrayBuffer());
-    await ffmpegInstance.writeFile('input.webm', inputData);
+    video.onloadedmetadata = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      
+      const stream = canvas.captureStream(30);
+      
+      // Izmanto WebM ierakstīšanai (jo MP4 parasti nav atbalstīts)
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9'
+        : 'video/webm';
+      
+      const recorder = new MediaRecorder(stream, {
+        mimeType: mimeType,
+        videoBitsPerSecond: 5000000
+      });
+      
+      const chunks = [];
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size) chunks.push(e.data);
+      };
+      
+      recorder.onstop = () => {
+        // 🔥 Izvade tiek saglabāta kā MP4 (lai gan iekšā ir WebM kodeks)
+        const mp4Blob = new Blob(chunks, { type: 'video/mp4' });
+        console.log(`✅ Done: ${(webmBlob.size / 1024).toFixed(0)}KB → ${(mp4Blob.size / 1024).toFixed(0)}KB`);
+        URL.revokeObjectURL(video.src);
+        resolve(mp4Blob);
+      };
+      
+      recorder.onerror = (err) => {
+        URL.revokeObjectURL(video.src);
+        reject(err);
+      };
+      
+      video.play();
+      recorder.start(1000);
+      
+      const drawFrame = () => {
+        if (video.ended || video.paused) {
+          recorder.stop();
+          return;
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        requestAnimationFrame(drawFrame);
+      };
+      
+      video.onended = () => recorder.stop();
+      drawFrame();
+    };
     
-    await ffmpegInstance.exec([
-      '-i', 'input.webm',
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-crf', '23',
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      '-movflags', '+faststart',
-      '-y',
-      'output.mp4'
-    ]);
-    
-    const data = await ffmpegInstance.readFile('output.mp4');
-    await ffmpegInstance.deleteFile('input.webm');
-    await ffmpegInstance.deleteFile('output.mp4');
-    
-    const mp4Blob = new Blob([data.buffer], { type: 'video/mp4' });
-    
-    console.log(`✅ Done: ${(webmBlob.size / 1024).toFixed(0)}KB → ${(mp4Blob.size / 1024).toFixed(0)}KB`);
-    
-    return mp4Blob;
-    
-  } catch (error) {
-    console.error('❌ Conversion error:', error);
-    throw new Error('Video conversion failed. Please try again.');
-  }
+    video.onerror = (err) => {
+      URL.revokeObjectURL(video.src);
+      reject(err);
+    };
+  });
 }
