@@ -121,7 +121,7 @@ export async function uploadVideoToIPFS(stream, duration = 15000) {
   // 2. Ieraksta video
   const recorder = new MediaRecorder(stream, { 
     mimeType,
-    videoBitsPerSecond: 5000000 // 5 Mbps kvalitātei
+    videoBitsPerSecond: 5000000
   });
   
   const chunks = [];
@@ -148,7 +148,6 @@ export async function uploadVideoToIPFS(stream, duration = 15000) {
             showToast('✅ Conversion successful!', 'success');
           } catch (conversionError) {
             console.error('Conversion failed:', conversionError);
-            // Fallback: sūta oriģinālo WebM
             showToast('⚠️ Conversion failed, uploading original WebM...', 'warning');
             finalFile = new File([recordedBlob], `video_${Date.now()}.webm`, { type: 'video/webm' });
           }
@@ -177,10 +176,8 @@ export async function uploadVideoToIPFS(stream, duration = 15000) {
       reject(err);
     };
     
-    // Sāk ierakstīšanu
     recorder.start(1000);
     
-    // Aptur pēc norādītā laika
     setTimeout(() => { 
       if (recorder.state === 'recording') recorder.stop(); 
     }, duration);
