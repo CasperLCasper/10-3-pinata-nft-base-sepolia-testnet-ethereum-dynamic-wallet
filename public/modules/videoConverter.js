@@ -46,14 +46,12 @@ export async function convertWebMToMP4(webmBlob) {
       
       const stream = canvas.captureStream(30);
       
-      // 🔥 IERAKSTA MP4, JA ATBALSTA
+      // 🔥 VISPIRMS MĒĢINA MP4, TAD VIENKĀRŠU WEBM
       let mimeType;
-      if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) {
-        mimeType = 'video/mp4;codecs=avc1';
-      } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+      if (MediaRecorder.isTypeSupported('video/mp4')) {
         mimeType = 'video/mp4';
       } else {
-        mimeType = 'video/webm;codecs=vp9';
+        mimeType = 'video/webm';  // vienkāršs, bez codecs
       }
       
       console.log('🎬 Recording with mimeType:', mimeType);
