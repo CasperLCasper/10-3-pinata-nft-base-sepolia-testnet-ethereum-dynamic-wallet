@@ -1,10 +1,7 @@
 // ============================================ //
 // VIDEO CONVERTER - WebM to MP4 in Browser
-// FFmpeg.wasm BEZ worker (single-thread)
+// FFmpeg.wasm UMD versija (bez worker/ESM)
 // ============================================ //
-
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile } from '@ffmpeg/util';
 
 let ffmpeg = null;
 let isFFmpegLoaded = false;
@@ -12,20 +9,29 @@ let isFFmpegLoaded = false;
 async function initFFmpeg() {
   if (isFFmpegLoaded && ffmpeg) return ffmpeg;
   
-  console.log('🔄 Loading FFmpeg.wasm (single-thread)...');
+  console.log('🔄 Loading FFmpeg.wasm (UMD, no worker)...');
   
-  ffmpeg = new FFmpeg();
+  // Ielādē UMD versiju kā script (globāls FFmpeg)
+  if (!window.FFmpegWASM) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js';
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
   
-  // 🔥 IZMANTO TIKAI CDN, BEZ WORKER (single-thread režīms)
-  // Nenorāda workerURL — FFmpeg strādās galvenajā threadā
+  const { FFmpeg: FFmpegClass } = window.FFmpegWASM;
+  ffmpeg = new FFmpegClass();
+  
   await ffmpeg.load({
-    coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js',
-    wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm'
-    // ❌ NAV workerURL — tas novērš CORS kļūdu!
+    coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
+    wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm'
   });
   
   isFFmpegLoaded = true;
-  console.log('✅ FFmpeg.wasm loaded (single-thread mode)');
+  console.log('✅ FFmpeg.wasm loaded (UMD)');
   
   return ffmpeg;
 }
@@ -43,28 +49,27 @@ export function isMP4Supported() {
   
   for (const codec of mp4Codecs) {
     if (MediaRecorder.isTypeSupported(codec)) {
-      console.log(`✅ MP4 supported with codec: ${codec}`);
+      console.log(`✅ MP4 supported: ${codec}`);
       return true;
     }
   }
   
-  console.log('⚠️ MP4 recording not supported, will use WebM + convert');
   return false;
 }
 
 export async function convertWebMToMP4(webmBlob) {
   try {
     console.log('🔄 Converting WebM to MP4...');
-    console.log(`📦 Input size: ${(webmBlob.size / 1024 / 1024).toFixed(2)}MB`);
     
     const ffmpegInstance = await initFFmpeg();
     
-    await ffmpegInstance.writeFile('input.webm', await fetchFile(webmBlob));
+    const inputData = new Uint8Array(await webmBlob.arrayBuffer());
+    await ffmpegInstance.writeFile('input.webm', inputData);
     
     await ffmpegInstance.exec([
       '-i', 'input.webm',
       '-c:v', 'libx264',
-      '-preset', 'ultrafast',    // Ātrāk (single-thread)
+      '-preset', 'ultrafast',
       '-crf', '23',
       '-c:a', 'aac',
       '-b:a', '128k',
