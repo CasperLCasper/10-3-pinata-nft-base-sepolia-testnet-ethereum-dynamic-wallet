@@ -1,89 +1,120 @@
+// ============================================ //
+// IPFS FUNCTIONS
+// ============================================ //
+
 import { apiFetch } from './api.js';
-import { showToast } from './ui.js';
+import { showToast, showProgress, setProgress, hideProgress } from './ui.js';
 import { PINATA_GATEWAY } from './config.js';
+import { UI } from './state.js';
 
-import { FFmpeg } from 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js';
-import { fetchFile, toBlobURL } from 'https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js';
-
-let ffmpeg = null;
-
-async function loadFFmpeg() {
-    if (ffmpeg) return ffmpeg;
-    ffmpeg = new FFmpeg();
-    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-    await ffmpeg.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-        workerURL: await toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'text/javascript')
-    });
-    return ffmpeg;
+export function showIPFSPreview(imageURL, videoURL, metadataURL) {
+  if (UI.previewImage) {
+    UI.previewImage.innerHTML = '';
+    UI.previewVideo.innerHTML = '';
+    UI.previewMetadata.innerHTML = '';
+    if (imageURL) UI.previewImage.innerHTML = `🖼️ Image: <a href="${PINATA_GATEWAY}${imageURL.cid}" target="_blank">${imageURL.cid.substring(0, 20)}...</a>`;
+    if (videoURL) UI.previewVideo.innerHTML = `🎬 Video: <a href="${PINATA_GATEWAY}${videoURL.cid}" target="_blank">${videoURL.cid.substring(0, 20)}...</a>`;
+    if (metadataURL) UI.previewMetadata.innerHTML = `📄 Metadata: <a href="${PINATA_GATEWAY}${metadataURL.cid}" target="_blank">${metadataURL.cid.substring(0, 20)}...</a>`;
+    if (UI.ipfsPreview) UI.ipfsPreview.style.display = 'block';
+    setTimeout(() => { if (UI.ipfsPreview) UI.ipfsPreview.style.display = 'none'; }, 10000);
+  }
 }
 
 export async function uploadFileToIPFS(file) {
-    const tokenRes = await apiFetch('/api/getUploadToken', { method: 'POST' });
-    const tokenData = await tokenRes.json();
-    
-    const formData = new FormData();
-    formData.append('file', file);
-
-    const uploadRes = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${tokenData.token}` },
-        body: formData
-    });
-
-    const result = await uploadRes.json();
-    return { 
-        success: true, 
-        ipfs: `${PINATA_GATEWAY}${result.IpfsHash}`, 
-        cid: result.IpfsHash 
-    };
-}
-
-export async function uploadVideoToIPFS(stream, duration = 15000) {
-    const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
-    showToast(`Ieraksta ${mimeType}...`, 'info');
-    
-    const recorder = new MediaRecorder(stream, { mimeType });
-    const chunks = [];
-
-    return new Promise((resolve) => {
-        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-        recorder.onstop = async () => {
-            const rawBlob = new Blob(chunks, { type: mimeType });
-
-            if (mimeType === 'video/mp4') {
-                showToast('Safari MP4 gatavs...', 'success');
-                const file = new File([rawBlob], `v_${Date.now()}.mp4`, { type: 'video/mp4' });
-                return resolve(await uploadFileToIPFS(file));
-            }
-
-            showToast('Konvertē uz MP4...', 'info');
-            const ff = await loadFFmpeg();
-            await ff.writeFile('in.webm', await fetchFile(rawBlob));
-            await ff.exec(['-i', 'in.webm', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', 'out.mp4']);
-            const data = await ff.readFile('out.mp4');
-            const mp4File = new File([data.buffer], `v_${Date.now()}.mp4`, { type: 'video/mp4' });
-            resolve(await uploadFileToIPFS(mp4File));
-        };
-        recorder.start();
-        setTimeout(() => recorder.stop(), duration);
-    });
-}
-
-export async function uploadImageToIPFS(canvas) {
-    return new Promise((resolve) => {
-        canvas.toBlob(async (blob) => {
-            const file = new File([blob], `img_${Date.now()}.png`, { type: 'image/png' });
-            resolve(await uploadFileToIPFS(file));
-        }, 'image/png');
-    });
+  showToast('Getting upload permission...', 'info');
+  
+  const tokenRes = await apiFetch('/api/getUploadToken', {
+    method: 'POST'
+  });
+  
+  if (!tokenRes.ok) {
+    const errorText = await tokenRes.text();
+    console.error('GetUploadToken error:', tokenRes.status, errorText);
+    throw new Error(`Failed to get upload permission: ${tokenRes.status}`);
+  }
+  
+  const tokenData = await tokenRes.json();
+  
+  if (!tokenData.token) {
+    throw new Error("No token received from server");
+  }
+  
+  showToast('Uploading file to IPFS...', 'info');
+  
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const uploadRes = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${tokenData.token}` },
+    body: formData
+  });
+  
+  if (!uploadRes.ok) {
+    const errorText = await uploadRes.text();
+    console.error('Pinata upload error:', errorText);
+    throw new Error(`Pinata upload failed: ${uploadRes.status}`);
+  }
+  
+  const result = await uploadRes.json();
+  if (!result.IpfsHash) throw new Error("Upload failed - no IPFS hash");
+  
+  console.log("File uploaded:", result.IpfsHash);
+  
+  return { 
+    success: true,
+    ipfs: `ipfs://${result.IpfsHash}`,
+    cid: result.IpfsHash
+  };
 }
 
 export async function uploadMetadataToIPFS(metadata) {
-    const res = await apiFetch('/api/uploadMetadataToIPFS', {
-        method: 'POST',
-        body: JSON.stringify(metadata)
-    });
-    return await res.json();
+  showToast('Preparing metadata...', 'info');
+  
+  const response = await apiFetch('/api/uploadMetadataToIPFS', {
+    method: 'POST',
+    body: JSON.stringify(metadata)
+  });
+  
+  if (!response.ok) throw new Error(`Metadata upload failed: ${response.status}`);
+  
+  showToast('Metadata uploaded!', 'success');
+  return await response.json();
+}
+
+export async function uploadImageToIPFS(canvas) {
+  showToast('Preparing image...', 'info');
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(async (blob) => {
+      if (!blob) { reject(new Error('Failed to create image')); return; }
+      const file = new File([blob], `snapshot_${Date.now()}.png`, { type: 'image/png' });
+      try { 
+        showToast('Uploading image...', 'info'); 
+        resolve(await uploadFileToIPFS(file)); 
+      } catch (error) { reject(error); }
+    }, 'image/png');
+  });
+}
+
+export async function uploadVideoToIPFS(stream, duration = 15000) {
+  showToast('Recording video...', 'info');
+  let mimeType = 'video/webm';
+  if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/mp4';
+  const recorder = new MediaRecorder(stream, { mimeType });
+  const chunks = [];
+  return new Promise((resolve, reject) => {
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    recorder.onstop = async () => {
+      const ext = mimeType === 'video/mp4' ? 'mp4' : 'webm';
+      const blob = new Blob(chunks, { type: mimeType });
+      const file = new File([blob], `video_${Date.now()}.${ext}`, { type: mimeType });
+      try { 
+        showToast('Uploading video...', 'info'); 
+        resolve(await uploadFileToIPFS(file)); 
+      } catch (error) { reject(error); }
+    };
+    recorder.onerror = (err) => reject(err);
+    recorder.start(1000);
+    setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, duration);
+  });
 }
