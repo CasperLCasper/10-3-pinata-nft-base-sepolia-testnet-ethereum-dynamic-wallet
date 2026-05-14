@@ -6,6 +6,7 @@ import { apiFetch } from './api.js';
 import { showToast, showProgress, setProgress, hideProgress } from './ui.js';
 import { PINATA_GATEWAY } from './config.js';
 import { UI } from './state.js';
+import { convertWebMToMP4, isMP4Supported } from './videoConverter.js';
 
 export function showIPFSPreview(imageURL, videoURL, metadataURL) {
   if (UI.previewImage) {
@@ -96,25 +97,86 @@ export async function uploadImageToIPFS(canvas) {
   });
 }
 
+// 🔥 JAUNĀ VIDEO UPLOAD FUNKCIJA AR MP4 KONVERTĒŠANU
 export async function uploadVideoToIPFS(stream, duration = 15000) {
-  showToast('Recording video...', 'info');
-  let mimeType = 'video/webm';
-  if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/mp4';
-  const recorder = new MediaRecorder(stream, { mimeType });
+  showToast('Checking video format support...', 'info');
+  
+  // 1. Pārbauda, vai browseris atbalsta MP4 ierakstīšanu
+  const canRecordMP4 = isMP4Supported();
+  
+  let mimeType, fileExtension;
+  
+  if (canRecordMP4) {
+    // ✅ Browseris spēj ierakstīt MP4 uzreiz
+    mimeType = 'video/mp4';
+    fileExtension = 'mp4';
+    showToast('Recording MP4 directly...', 'info');
+  } else {
+    // ⚠️ Browseris ieraksta WebM, pēc tam konvertēs uz MP4
+    mimeType = MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : 'video/mp4';
+    fileExtension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+    showToast(`Recording ${fileExtension.toUpperCase()} (will convert to MP4)...`, 'info');
+  }
+  
+  // 2. Ieraksta video
+  const recorder = new MediaRecorder(stream, { 
+    mimeType,
+    videoBitsPerSecond: 5000000 // 5 Mbps kvalitātei
+  });
+  
   const chunks = [];
+  
   return new Promise((resolve, reject) => {
-    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-    recorder.onstop = async () => {
-      const ext = mimeType === 'video/mp4' ? 'mp4' : 'webm';
-      const blob = new Blob(chunks, { type: mimeType });
-      const file = new File([blob], `video_${Date.now()}.${ext}`, { type: mimeType });
-      try { 
-        showToast('Uploading video...', 'info'); 
-        resolve(await uploadFileToIPFS(file)); 
-      } catch (error) { reject(error); }
+    recorder.ondataavailable = (e) => { 
+      if (e.data && e.data.size) chunks.push(e.data); 
     };
+    
+    recorder.onstop = async () => {
+      try {
+        const recordedBlob = new Blob(chunks, { type: mimeType });
+        
+        let finalFile;
+        
+        // 3. Ja nepieciešams, konvertē WebM → MP4
+        if (!canRecordMP4 && fileExtension === 'webm') {
+          showToast('Converting WebM to MP4...', 'info');
+          
+          try {
+            const mp4Blob = await convertWebMToMP4(recordedBlob);
+            finalFile = new File([mp4Blob], `video_${Date.now()}.mp4`, { type: 'video/mp4' });
+            showToast('Conversion successful!', 'success');
+          } catch (conversionError) {
+            console.error('Conversion failed:', conversionError);
+            // Fallback: sūta oriģinālo WebM
+            showToast('Conversion failed, uploading original WebM...', 'warning');
+            finalFile = new File([recordedBlob], `video_${Date.now()}.webm`, { type: 'video/webm' });
+          }
+        } else {
+          // MP4 jau ir gatavs
+          finalFile = new File([recordedBlob], `video_${Date.now()}.mp4`, { type: 'video/mp4' });
+        }
+        
+        // 4. Augšupielādē failu (viemmēr MP4 vai fallback WebM)
+        showToast('Uploading video to IPFS...', 'info');
+        const result = await uploadFileToIPFS(finalFile);
+        
+        console.log(`✅ Video uploaded: ${result.cid} (${finalFile.type})`);
+        resolve(result);
+        
+      } catch (error) {
+        console.error('Video processing error:', error);
+        reject(error);
+      }
+    };
+    
     recorder.onerror = (err) => reject(err);
+    
+    // Sāk ierakstīšanu
     recorder.start(1000);
-    setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, duration);
+    
+    // Aptur pēc norādītā laika
+    setTimeout(() => { 
+      if (recorder.state === 'recording') recorder.stop(); 
+    }, duration);
   });
 }
