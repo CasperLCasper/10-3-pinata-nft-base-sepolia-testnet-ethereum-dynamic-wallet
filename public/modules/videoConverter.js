@@ -1,41 +1,48 @@
 // ============================================
-// VIDEO CONVERTER - REAL WebM → MP4
-// using ffmpeg.wasm (stable, explicit wasmURL)
+// VIDEO CONVERTER - WebM → MP4
+// Lokālie ffmpeg faili + UMD globālais skripts
 // ============================================
 
-import { FFmpeg } from 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js';
-import { fetchFile } from 'https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/esm/index.js';
-
-const ffmpeg = new FFmpeg();
+let ffmpeg = null;
 let loaded = false;
 
 async function loadFFmpeg() {
-  if (loaded) return;
+  if (loaded) return ffmpeg;
 
-  console.log('⏳ Loading FFmpeg...');
+  console.log('⏳ Loading FFmpeg.wasm...');
 
-  // 🔥 VIENS AVOTS (jsdelivr), EKSPLICĪTS wasmURL
-  await ffmpeg.load({
-    coreURL: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
-    wasmURL: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm'
+  // 1. Ielādē UMD build KĀ GLOBĀLU SKRIPTU (nav ESM, nav worker)
+  await new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js';
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
   });
 
-  ffmpeg.on('log', ({ message }) => {
-    console.log('FFMPEG:', message);
+  const { FFmpeg: FFmpegClass } = window.FFmpegWASM;
+  ffmpeg = new FFmpegClass();
+  
+  // 2. Izmanto TAVUS LOKĀLOS failus
+  await ffmpeg.load({
+    coreURL: '/ffmpeg/ffmpeg-core.js',
+    wasmURL: '/ffmpeg/ffmpeg-core.wasm'
   });
 
   loaded = true;
   console.log('✅ FFmpeg loaded');
+  return ffmpeg;
 }
 
 export async function convertWebMToMP4(webmBlob) {
-  await loadFFmpeg();
+  const ffmpegInstance = await loadFFmpeg();
 
   console.log('🔄 Converting:', (webmBlob.size / 1024).toFixed(0), 'KB');
 
-  await ffmpeg.writeFile('input.webm', await fetchFile(webmBlob));
+  const inputData = new Uint8Array(await webmBlob.arrayBuffer());
+  await ffmpegInstance.writeFile('input.webm', inputData);
 
-  await ffmpeg.exec([
+  await ffmpegInstance.exec([
     '-i', 'input.webm',
     '-c:v', 'libx264',
     '-preset', 'ultrafast',
@@ -46,9 +53,6 @@ export async function convertWebMToMP4(webmBlob) {
     'output.mp4'
   ]);
 
-  const data = await ffmpeg.readFile('output.mp4');
-  const mp4Blob = new Blob([data], { type: 'video/mp4' });
-
-  console.log('✅ MP4:', (mp4Blob.size / 1024).toFixed(0), 'KB');
-  return mp4Blob;
+  const data = await ffmpegInstance.readFile('output.mp4');
+  return new Blob([data], { type: 'video/mp4' });
 }
