@@ -47,7 +47,7 @@
         <span>Blockchain</span>
       </div>
       <select id="chainSelect" class="chain-dropdown">
-        <optgroup label=" Testnet">
+        <optgroup label="🪙 Testnet">
           <option value="sepolia" data-icon="🔷">🔷 Ethereum Sepolia</option>
           <option value="mumbai" data-icon="🟣">🟣 Polygon Mumbai</option>
           <option value="bscTestnet" data-icon="🟡">🟡 BNB Chain Testnet</option>
@@ -77,17 +77,17 @@
     </div>
 
     <div id="accountDisplay">Connected account: —</div>
-
+    
     <div id="progressBarContainer"><div id="progressBar"></div></div>
     <div id="statusMsg" class="status"></div>
-
+    
     <div id="recordTimer">Recording: 0 / 15 s</div>
 
     <div class="snapshot-container">
       <canvas id="snapshotCanvas" width="1920" height="1080"></canvas>
       <div id="fullscreenIcon">⤢ Fullscreen</div>
       <div id="toggleInfoIcon">ℹ Info</div>
-
+      
       <div id="tokenListContainer">
         <table>
           <thead>
@@ -115,10 +115,10 @@
 
   <!-- Ethers.js - globāls, pieejams visur -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.umd.min.js"></script>
-
+  
   <!-- themes.js - nav modulis, definē window.ADDON_STYLES -->
   <script src="./themes.js"></script>
-
+  
   <!-- app.js - ES MODULIS (sadalīts) -->
   <script type="module" src="./app.js"></script>
 </body>
