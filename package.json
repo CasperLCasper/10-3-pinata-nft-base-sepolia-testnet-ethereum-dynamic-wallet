@@ -4,7 +4,9 @@
   "type": "module",
   "dependencies": {
     "ethers": "^6.10.0",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "node-fetch": "^3.3.2",
+    "pinata": "^2.1.0"
   },
   "scripts": {
     "dev": "vercel dev",
