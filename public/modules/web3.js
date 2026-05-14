@@ -9,39 +9,34 @@ export async function connectWallet() {
         showToast("MetaMask netika atrasts!", "warning");
         return null;
     }
-
     try {
-        // Izmantojam ethers v6 (kas ir tavā package.json)
         provider = new ethers.BrowserProvider(window.ethereum);
         const accounts = await provider.send("eth_requestAccounts", []);
         signer = await provider.getSigner();
         userAddress = accounts[0];
-
-        showToast(`Maciņš pievienots: ${userAddress.substring(0, 6)}...`, "success");
+        showToast("Maciņš pieslēgts!", "success");
         return userAddress;
     } catch (error) {
-        console.error("Connection error:", error);
-        showToast("Neizdevās pieslēgt maciņu", "error");
+        showToast("Pieslēgšanās kļūda", "error");
         return null;
     }
 }
 
-export async function mintNFT(metadataURL, contractAddress, abi) {
-    if (!signer) {
-        showToast("Vispirms pieslēdziet maciņu!", "warning");
-        return;
-    }
+export async function mintNFT(metadataURL) {
+    if (!signer) return showToast("Pieslēdz maciņu!", "warning");
 
     try {
-        showToast("Apstipriniet mintošanu maciņā...", "info");
+        // Paņemam līguma datus no servera (no .env)
+        const configRes = await fetch('/api/getUploadToken', { method: 'POST' });
+        const { contractAddress } = await configRes.json();
         
+        const abi = ["function safeMint(address to, string uri) public"];
         const contract = new ethers.Contract(contractAddress, abi, signer);
-        const tx = await contract.safeMint(userAddress, metadataURL.ipfs);
         
-        showToast("Transakcija nosūtīta...", "info");
+        const tx = await contract.safeMint(userAddress, metadataURL.ipfs);
+        showToast("Transakcija parakstīta!", "info");
         return await tx.wait();
     } catch (error) {
-        console.error("Mint error:", error);
         showToast("Mintošana neizdevās", "error");
         throw error;
     }
