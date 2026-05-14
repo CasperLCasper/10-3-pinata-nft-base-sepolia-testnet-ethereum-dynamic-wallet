@@ -9,7 +9,7 @@ import { fetchFile, toBlobURL } from '@ffmpeg/util';
 let ffmpeg = null;
 let isFFmpegLoaded = false;
 
-// 🔥 Inicializē FFmpeg (vienreiz)
+// 🔥 Inicializē FFmpeg (vienreiz) - FAILI NO TAVA DOMĒNA
 async function initFFmpeg() {
   if (isFFmpegLoaded && ffmpeg) return ffmpeg;
   
@@ -17,12 +17,11 @@ async function initFFmpeg() {
   
   ffmpeg = new FFmpeg();
   
-  // Ielādē FFmpeg core
-  const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm';
-  
+  // 🔥 FAILI TIEK IELĀDĒTI NO TAVA PAŠA DOMĒNA (bez CORS problēmām!)
   await ffmpeg.load({
-    coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-    wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
+    coreURL: await toBlobURL('/ffmpeg-core/ffmpeg-core.js', 'text/javascript'),
+    wasmURL: await toBlobURL('/ffmpeg-core/ffmpeg-core.wasm', 'application/wasm'),
+    workerURL: '/ffmpeg-core/ffmpeg-core.worker.js'
   });
   
   isFFmpegLoaded = true;
@@ -33,7 +32,6 @@ async function initFFmpeg() {
 
 // 🔥 Pārbauda, vai browseris spēj ierakstīt MP4
 export function isMP4Supported() {
-  // Pārbauda dažādus MP4 kodekus
   const mp4Codecs = [
     'video/mp4;codecs=h264',
     'video/mp4;codecs=avc1',
@@ -59,6 +57,7 @@ export function isMP4Supported() {
 export async function convertWebMToMP4(webmBlob) {
   try {
     console.log('🔄 Starting WebM to MP4 conversion...');
+    console.log(`📦 Input WebM size: ${(webmBlob.size / 1024 / 1024).toFixed(2)}MB`);
     
     const ffmpegInstance = await initFFmpeg();
     
@@ -68,13 +67,13 @@ export async function convertWebMToMP4(webmBlob) {
     // Izpilda konvertāciju
     await ffmpegInstance.exec([
       '-i', 'input.webm',
-      '-c:v', 'libx264',      // H.264 video kodeks
-      '-preset', 'fast',       // Ātrums (fast = labs balanss)
-      '-crf', '23',            // Kvalitāte (mazāks = labāka, 18-28)
-      '-c:a', 'aac',           // AAC audio kodeks
-      '-b:a', '128k',          // Audio bitrate
-      '-movflags', '+faststart', // Ātrai atskaņošanai web
-      '-y',                     // Pārraksta, ja eksistē
+      '-c:v', 'libx264',         // H.264 video kodeks
+      '-preset', 'fast',          // Ātrums (fast = labs balanss)
+      '-crf', '23',               // Kvalitāte (mazāks = labāka, 18-28)
+      '-c:a', 'aac',              // AAC audio kodeks
+      '-b:a', '128k',             // Audio bitrate
+      '-movflags', '+faststart',  // Ātrai atskaņošanai web
+      '-y',                        // Pārraksta, ja eksistē
       'output.mp4'
     ]);
     
