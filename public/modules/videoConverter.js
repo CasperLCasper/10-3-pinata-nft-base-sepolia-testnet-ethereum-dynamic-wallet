@@ -1,34 +1,10 @@
 // ============================================ //
-// VIDEO CONVERTER - WebM to MP4 in Browser
+// VIDEO CONVERTER - WebM to MP4 via Canvas
+// BEZ FFmpeg.wasm, nav CORS problēmu!
 // ============================================ //
 
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
-
-let ffmpeg = null;
-let isFFmpegLoaded = false;
-
-async function initFFmpeg() {
-  if (isFFmpegLoaded && ffmpeg) return ffmpeg;
-  
-  console.log('🔄 Loading FFmpeg.wasm...');
-  
-  ffmpeg = new FFmpeg();
-  
-  // ✅ .js no TAVA domēna, .wasm no CDN, .worker.js no TAVA domēna
-  await ffmpeg.load({
-    coreURL: await toBlobURL('/ffmpeg-core/ffmpeg-core.js', 'text/javascript'),
-    wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm',
-    workerURL: '/ffmpeg-core/ffmpeg-core.worker.js'  // ← TAVS DOMĒNS, NEVIS CDN!
-  });
-  
-  isFFmpegLoaded = true;
-  console.log('✅ FFmpeg.wasm loaded successfully');
-  
-  return ffmpeg;
-}
-
 export function isMP4Supported() {
+  // Pārbauda MP4 atbalstu ierakstīšanai
   const mp4Codecs = [
     'video/mp4;codecs=h264',
     'video/mp4;codecs=avc1',
@@ -46,44 +22,73 @@ export function isMP4Supported() {
     }
   }
   
-  console.log('⚠️ MP4 recording not supported, will use WebM');
+  console.log('⚠️ MP4 recording not supported');
   return false;
 }
 
+// 🔥 Konvertē WebM → MP4 izmantojot Canvas + MediaRecorder
 export async function convertWebMToMP4(webmBlob) {
-  try {
-    console.log('🔄 Starting WebM to MP4 conversion...');
-    console.log(`📦 Input WebM size: ${(webmBlob.size / 1024 / 1024).toFixed(2)}MB`);
+  return new Promise((resolve, reject) => {
+    console.log('🔄 Converting WebM to MP4 via Canvas...');
     
-    const ffmpegInstance = await initFFmpeg();
+    const video = document.createElement('video');
+    video.src = URL.createObjectURL(webmBlob);
+    video.muted = true;
+    video.playsInline = true;
     
-    await ffmpegInstance.writeFile('input.webm', await fetchFile(webmBlob));
+    video.onloadedmetadata = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      
+      const stream = canvas.captureStream(30);
+      const recorder = new MediaRecorder(stream, {
+        mimeType: 'video/mp4',
+        videoBitsPerSecond: 5000000
+      });
+      
+      const chunks = [];
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size) chunks.push(e.data);
+      };
+      
+      recorder.onstop = () => {
+        const mp4Blob = new Blob(chunks, { type: 'video/mp4' });
+        console.log(`✅ Converted: ${(webmBlob.size / 1024).toFixed(1)}KB → ${(mp4Blob.size / 1024).toFixed(1)}KB`);
+        URL.revokeObjectURL(video.src);
+        resolve(mp4Blob);
+      };
+      
+      recorder.onerror = (err) => {
+        URL.revokeObjectURL(video.src);
+        reject(err);
+      };
+      
+      video.play();
+      recorder.start(1000);
+      
+      // Zīmē video kadrus uz canvas
+      const drawFrame = () => {
+        if (video.ended || video.paused) {
+          recorder.stop();
+          return;
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        requestAnimationFrame(drawFrame);
+      };
+      
+      video.onended = () => {
+        recorder.stop();
+      };
+      
+      drawFrame();
+    };
     
-    await ffmpegInstance.exec([
-      '-i', 'input.webm',
-      '-c:v', 'libx264',
-      '-preset', 'fast',
-      '-crf', '23',
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      '-movflags', '+faststart',
-      '-y',
-      'output.mp4'
-    ]);
-    
-    const data = await ffmpegInstance.readFile('output.mp4');
-    
-    await ffmpegInstance.deleteFile('input.webm');
-    await ffmpegInstance.deleteFile('output.mp4');
-    
-    const mp4Blob = new Blob([data.buffer], { type: 'video/mp4' });
-    
-    console.log(`✅ Conversion complete: ${(webmBlob.size / 1024).toFixed(1)}KB → ${(mp4Blob.size / 1024).toFixed(1)}KB`);
-    
-    return mp4Blob;
-    
-  } catch (error) {
-    console.error('❌ FFmpeg conversion error:', error);
-    throw new Error('Video conversion failed. Please try a different browser or format.');
-  }
+    video.onerror = (err) => {
+      URL.revokeObjectURL(video.src);
+      reject(err);
+    };
+  });
 }
