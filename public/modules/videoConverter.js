@@ -1,6 +1,5 @@
 // ============================================ //
 // VIDEO CONVERTER - WebM to MP4 in Browser
-// Izmanto FFmpeg.wasm WebAssembly
 // ============================================ //
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
@@ -9,7 +8,6 @@ import { fetchFile, toBlobURL } from '@ffmpeg/util';
 let ffmpeg = null;
 let isFFmpegLoaded = false;
 
-// 🔥 Inicializē FFmpeg (vienreiz)
 async function initFFmpeg() {
   if (isFFmpegLoaded && ffmpeg) return ffmpeg;
   
@@ -17,11 +15,11 @@ async function initFFmpeg() {
   
   ffmpeg = new FFmpeg();
   
-  // 🔥 .js un .worker.js no TAVA domēna, .wasm no CDN (jo pārāk liels GitHub)
+  // ✅ .js no TAVA domēna, .wasm no CDN, .worker.js no TAVA domēna
   await ffmpeg.load({
     coreURL: await toBlobURL('/ffmpeg-core/ffmpeg-core.js', 'text/javascript'),
     wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm',
-    workerURL: '/ffmpeg-core/ffmpeg-core.worker.js'
+    workerURL: '/ffmpeg-core/ffmpeg-core.worker.js'  // ← TAVS DOMĒNS, NEVIS CDN!
   });
   
   isFFmpegLoaded = true;
@@ -30,7 +28,6 @@ async function initFFmpeg() {
   return ffmpeg;
 }
 
-// 🔥 Pārbauda, vai browseris spēj ierakstīt MP4
 export function isMP4Supported() {
   const mp4Codecs = [
     'video/mp4;codecs=h264',
@@ -53,7 +50,6 @@ export function isMP4Supported() {
   return false;
 }
 
-// 🔥 Konvertē WebM → MP4
 export async function convertWebMToMP4(webmBlob) {
   try {
     console.log('🔄 Starting WebM to MP4 conversion...');
@@ -61,26 +57,22 @@ export async function convertWebMToMP4(webmBlob) {
     
     const ffmpegInstance = await initFFmpeg();
     
-    // Ieraksta WebM failu FFmpeg virtuālajā failu sistēmā
     await ffmpegInstance.writeFile('input.webm', await fetchFile(webmBlob));
     
-    // Izpilda konvertāciju
     await ffmpegInstance.exec([
       '-i', 'input.webm',
-      '-c:v', 'libx264',         // H.264 video kodeks
-      '-preset', 'fast',          // Ātrums (fast = labs balanss)
-      '-crf', '23',               // Kvalitāte (mazāks = labāka, 18-28)
-      '-c:a', 'aac',              // AAC audio kodeks
-      '-b:a', '128k',             // Audio bitrate
-      '-movflags', '+faststart',  // Ātrai atskaņošanai web
-      '-y',                        // Pārraksta, ja eksistē
+      '-c:v', 'libx264',
+      '-preset', 'fast',
+      '-crf', '23',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-movflags', '+faststart',
+      '-y',
       'output.mp4'
     ]);
     
-    // Izlasa rezultātu
     const data = await ffmpegInstance.readFile('output.mp4');
     
-    // Notīra pagaidu failus
     await ffmpegInstance.deleteFile('input.webm');
     await ffmpegInstance.deleteFile('output.mp4');
     
