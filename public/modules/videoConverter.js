@@ -9,7 +9,7 @@ import { fetchFile, toBlobURL } from '@ffmpeg/util';
 let ffmpeg = null;
 let isFFmpegLoaded = false;
 
-// 🔥 Inicializē FFmpeg (vienreiz) - FAILI NO TAVA DOMĒNA
+// 🔥 Inicializē FFmpeg (vienreiz)
 async function initFFmpeg() {
   if (isFFmpegLoaded && ffmpeg) return ffmpeg;
   
@@ -17,10 +17,10 @@ async function initFFmpeg() {
   
   ffmpeg = new FFmpeg();
   
-  // 🔥 FAILI TIEK IELĀDĒTI NO TAVA PAŠA DOMĒNA (bez CORS problēmām!)
+  // 🔥 .js un .worker.js no TAVA domēna, .wasm no CDN (jo pārāk liels GitHub)
   await ffmpeg.load({
     coreURL: await toBlobURL('/ffmpeg-core/ffmpeg-core.js', 'text/javascript'),
-    wasmURL: await toBlobURL('/ffmpeg-core/ffmpeg-core.wasm', 'application/wasm'),
+    wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm',
     workerURL: '/ffmpeg-core/ffmpeg-core.worker.js'
   });
   
