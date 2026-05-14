@@ -43,8 +43,14 @@ export async function convertWebMToMP4(webmBlob) {
       const ctx = canvas.getContext('2d');
       
       const stream = canvas.captureStream(30);
+      
+      // 🔥 Izmanto WebM, jo MP4 nav atbalstīts
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9'
+        : 'video/webm';
+      
       const recorder = new MediaRecorder(stream, {
-        mimeType: 'video/mp4',
+        mimeType: mimeType,
         videoBitsPerSecond: 5000000
       });
       
