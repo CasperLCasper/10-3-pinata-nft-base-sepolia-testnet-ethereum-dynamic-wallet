@@ -1,7 +1,7 @@
 {
   "headers": [
     {
-      "source": "/(.*)",
+      "source": "/public/modules/videoConverter.js",
       "headers": [
         {
           "key": "Cross-Origin-Opener-Policy",
@@ -19,15 +19,6 @@
         {
           "key": "Content-Type",
           "value": "application/wasm"
-        }
-      ]
-    },
-    {
-      "source": "/(.*\\.js)",
-      "headers": [
-        {
-          "key": "Content-Type",
-          "value": "application/javascript"
         }
       ]
     }
