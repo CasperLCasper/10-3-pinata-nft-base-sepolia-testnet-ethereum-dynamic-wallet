@@ -3,8 +3,8 @@
 // Izmanto FFmpeg.wasm WebAssembly
 // ============================================ //
 
-import { FFmpeg } from 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js';
-import { fetchFile, toBlobURL } from 'https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/ffmpeg-util.min.js';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
 let ffmpeg = null;
 let isFFmpegLoaded = false;
