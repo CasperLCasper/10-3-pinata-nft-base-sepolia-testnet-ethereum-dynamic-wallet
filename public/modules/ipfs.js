@@ -1,242 +1,120 @@
 // ============================================ //
-// IPFS FUNCTIONS (CLEAN + NFT SAFE VERSION)
+// IPFS FUNCTIONS
 // ============================================ //
 
 import { apiFetch } from './api.js';
-import { showToast, setProgress } from './ui.js';
+import { showToast, showProgress, setProgress, hideProgress } from './ui.js';
 import { PINATA_GATEWAY } from './config.js';
 import { UI } from './state.js';
-import { convertWebMToMP4 } from './videoConverter.js';
 
-/**
- * Show IPFS preview UI
- */
 export function showIPFSPreview(imageURL, videoURL, metadataURL) {
-  if (!UI.previewImage) return;
-
-  UI.previewImage.innerHTML = '';
-  UI.previewVideo.innerHTML = '';
-  UI.previewMetadata.innerHTML = '';
-
-  if (imageURL) {
-    UI.previewImage.innerHTML = `
-      🖼️ Image:
-      <a href="${PINATA_GATEWAY}${imageURL.cid}" target="_blank">
-        ${imageURL.cid.slice(0, 20)}...
-      </a>
-    `;
+  if (UI.previewImage) {
+    UI.previewImage.innerHTML = '';
+    UI.previewVideo.innerHTML = '';
+    UI.previewMetadata.innerHTML = '';
+    if (imageURL) UI.previewImage.innerHTML = `🖼️ Image: <a href="${PINATA_GATEWAY}${imageURL.cid}" target="_blank">${imageURL.cid.substring(0, 20)}...</a>`;
+    if (videoURL) UI.previewVideo.innerHTML = `🎬 Video: <a href="${PINATA_GATEWAY}${videoURL.cid}" target="_blank">${videoURL.cid.substring(0, 20)}...</a>`;
+    if (metadataURL) UI.previewMetadata.innerHTML = `📄 Metadata: <a href="${PINATA_GATEWAY}${metadataURL.cid}" target="_blank">${metadataURL.cid.substring(0, 20)}...</a>`;
+    if (UI.ipfsPreview) UI.ipfsPreview.style.display = 'block';
+    setTimeout(() => { if (UI.ipfsPreview) UI.ipfsPreview.style.display = 'none'; }, 10000);
   }
-
-  if (videoURL) {
-    UI.previewVideo.innerHTML = `
-      🎬 Video:
-      <a href="${PINATA_GATEWAY}${videoURL.cid}" target="_blank">
-        ${videoURL.cid.slice(0, 20)}...
-      </a>
-    `;
-  }
-
-  if (metadataURL) {
-    UI.previewMetadata.innerHTML = `
-      📄 Metadata:
-      <a href="${PINATA_GATEWAY}${metadataURL.cid}" target="_blank">
-        ${metadataURL.cid.slice(0, 20)}...
-      </a>
-    `;
-  }
-
-  UI.ipfsPreview.style.display = 'block';
-
-  setTimeout(() => {
-    UI.ipfsPreview.style.display = 'none';
-  }, 10000);
 }
 
-/**
- * Generic file upload to IPFS (Pinata)
- */
 export async function uploadFileToIPFS(file) {
-  showToast('Getting upload token...', 'info');
-
+  showToast('Getting upload permission...', 'info');
+  
   const tokenRes = await apiFetch('/api/getUploadToken', {
     method: 'POST'
   });
-
+  
   if (!tokenRes.ok) {
-    throw new Error('Failed to get upload token');
+    const errorText = await tokenRes.text();
+    console.error('GetUploadToken error:', tokenRes.status, errorText);
+    throw new Error(`Failed to get upload permission: ${tokenRes.status}`);
   }
-
-  const { token } = await tokenRes.json();
-
-  if (!token) {
-    throw new Error('No upload token received');
+  
+  const tokenData = await tokenRes.json();
+  
+  if (!tokenData.token) {
+    throw new Error("No token received from server");
   }
-
-  showToast('Uploading to IPFS...', 'info');
-
+  
+  showToast('Uploading file to IPFS...', 'info');
+  
   const formData = new FormData();
-
-  // IMPORTANT: always preserve filename
-  formData.append('file', file, file.name || 'file');
-
-  const uploadRes = await fetch(
-    'https://api.pinata.cloud/pinning/pinFileToIPFS',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`
-      },
-      body: formData
-    }
-  );
-
+  formData.append('file', file);
+  
+  const uploadRes = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${tokenData.token}` },
+    body: formData
+  });
+  
   if (!uploadRes.ok) {
-    const err = await uploadRes.text();
-    console.error('Pinata error:', err);
-    throw new Error('IPFS upload failed');
+    const errorText = await uploadRes.text();
+    console.error('Pinata upload error:', errorText);
+    throw new Error(`Pinata upload failed: ${uploadRes.status}`);
   }
-
+  
   const result = await uploadRes.json();
-
-  if (!result.IpfsHash) {
-    throw new Error('No IPFS hash returned');
-  }
-
-  return {
+  if (!result.IpfsHash) throw new Error("Upload failed - no IPFS hash");
+  
+  console.log("File uploaded:", result.IpfsHash);
+  
+  return { 
     success: true,
-    cid: result.IpfsHash,
-    ipfs: `ipfs://${result.IpfsHash}`
+    ipfs: `ipfs://${result.IpfsHash}`,
+    cid: result.IpfsHash
   };
 }
 
-/**
- * Upload image (canvas → PNG → IPFS)
- */
-export async function uploadImageToIPFS(canvas) {
-  showToast('Preparing image...', 'info');
-
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(async (blob) => {
-      if (!blob) {
-        return reject(new Error('Canvas export failed'));
-      }
-
-      const file = new File(
-        [blob],
-        `image_${Date.now()}.png`,
-        { type: 'image/png' }
-      );
-
-      try {
-        showToast('Uploading image...', 'info');
-        const res = await uploadFileToIPFS(file);
-        resolve(res);
-      } catch (err) {
-        reject(err);
-      }
-    }, 'image/png');
-  });
-}
-
-/**
- * Upload metadata JSON to IPFS
- */
 export async function uploadMetadataToIPFS(metadata) {
-  showToast('Uploading metadata...', 'info');
-
+  showToast('Preparing metadata...', 'info');
+  
   const response = await apiFetch('/api/uploadMetadataToIPFS', {
     method: 'POST',
     body: JSON.stringify(metadata)
   });
-
-  if (!response.ok) {
-    throw new Error('Metadata upload failed');
-  }
-
-  const result = await response.json();
-
-  showToast('Metadata uploaded', 'success');
-
-  return result;
+  
+  if (!response.ok) throw new Error(`Metadata upload failed: ${response.status}`);
+  
+  showToast('Metadata uploaded!', 'success');
+  return await response.json();
 }
 
-/**
- * MAIN VIDEO UPLOAD PIPELINE (FIXED & SIMPLE)
- *
- * IMPORTANT:
- * - ALWAYS record WEBM outside this function
- * - conversion happens ONLY here if needed
- */
+export async function uploadImageToIPFS(canvas) {
+  showToast('Preparing image...', 'info');
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(async (blob) => {
+      if (!blob) { reject(new Error('Failed to create image')); return; }
+      const file = new File([blob], `snapshot_${Date.now()}.png`, { type: 'image/png' });
+      try { 
+        showToast('Uploading image...', 'info'); 
+        resolve(await uploadFileToIPFS(file)); 
+      } catch (error) { reject(error); }
+    }, 'image/png');
+  });
+}
+
 export async function uploadVideoToIPFS(stream, duration = 15000) {
-  showToast('Starting recording...', 'info');
-
-  const recorder = new MediaRecorder(stream, {
-    mimeType: 'video/webm;codecs=vp8'
-  });
-
+  showToast('Recording video...', 'info');
+  let mimeType = 'video/webm';
+  if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/mp4';
+  const recorder = new MediaRecorder(stream, { mimeType });
   const chunks = [];
-
-  recorder.ondataavailable = (e) => {
-    if (e.data?.size) chunks.push(e.data);
-  };
-
-  const recordedBlob = await new Promise((resolve, reject) => {
-    recorder.onerror = reject;
-
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, {
-        type: 'video/webm'
-      });
-      resolve(blob);
+  return new Promise((resolve, reject) => {
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    recorder.onstop = async () => {
+      const ext = mimeType === 'video/mp4' ? 'mp4' : 'webm';
+      const blob = new Blob(chunks, { type: mimeType });
+      const file = new File([blob], `video_${Date.now()}.${ext}`, { type: mimeType });
+      try { 
+        showToast('Uploading video...', 'info'); 
+        resolve(await uploadFileToIPFS(file)); 
+      } catch (error) { reject(error); }
     };
-
+    recorder.onerror = (err) => reject(err);
     recorder.start(1000);
-
-    setTimeout(() => {
-      if (recorder.state === 'recording') {
-        recorder.stop();
-      }
-    }, duration);
+    setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, duration);
   });
-
-  console.log(
-    '📹 Recorded WEBM:',
-    (recordedBlob.size / 1024 / 1024).toFixed(2),
-    'MB'
-  );
-
-  let finalFile = recordedBlob;
-
-  // OPTIONAL: convert to MP4 only if ffmpeg exists
-  if (convertWebMToMP4) {
-    try {
-      showToast('Converting to MP4...', 'info');
-
-      const mp4Blob = await convertWebMToMP4(recordedBlob);
-
-      finalFile = new File(
-        [mp4Blob],
-        `video_${Date.now()}.mp4`,
-        { type: 'video/mp4' }
-      );
-
-      showToast('Converted to MP4', 'success');
-    } catch (err) {
-      console.warn('Conversion failed, fallback to WEBM', err);
-
-      finalFile = new File(
-        [recordedBlob],
-        `video_${Date.now()}.webm`,
-        { type: 'video/webm' }
-      );
-    }
-  }
-
-  showToast('Uploading to IPFS...', 'info');
-
-  const result = await uploadFileToIPFS(finalFile);
-
-  showToast('Upload complete!', 'success');
-
-  return result;
 }
